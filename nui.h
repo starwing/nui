@@ -175,11 +175,11 @@ NUI_API void       nui_setaction(NUInode *n, NUIaction *a);
 #endif /* NUI_INLINE */
 
 #define X(name, vtype, var) \
-    NUI_INLINE NUIvalue nui_v##var(vtype var) { \
-        NUIvalue v;                            \
-        v.type = NUI_T##name;                  \
-        v.u.var = var;                         \
-        return v;                              \
+    NUI_INLINE NUIvalue nui_##var##value(vtype var) { \
+        NUIvalue v;                                   \
+        v.type = NUI_T##name;                         \
+        v.u.var = var;                                \
+        return v;                                     \
     }
 
 NUI_VALUE_TYPES(X)

@@ -65,8 +65,8 @@ A user's nui code should looked like this:
 #include "nui_win32.h"
 
 #define STR(str) nui_string(S, #str)
-#define STRING_VALUE(str) nui_vstring(STR(str))
-#define ACTION_VALUE(str) nui_vaction(nui_namedaction(S, STR(str)))
+#define STRING_VALUE(str) nui_stringvalue(STR(str))
+#define ACTION_VALUE(str) nui_actionvalue(nui_namedaction(S, STR(str)))
 
 int main(void) {
     NUIstate *S = nui_openwin32();
@@ -97,12 +97,12 @@ local win = nui.node {
     layout_margin = "10px";
 
     nui.label {
-	text = "Hello world!";
+        text = "Hello world!";
     };
 
     nui.button {
-	text = "OK";
-	action = "quit";
+        text = "OK";
+        action = "quit";
     };
 }
 
@@ -135,3 +135,4 @@ Things to do
 - the Lua binding for nui.
 
 
+<!-- vim: set ft=markdown nu et sw=4 : -->
