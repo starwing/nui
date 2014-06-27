@@ -40,8 +40,8 @@ typedef enum NUIpredefstr {
 #endif
 
 /* mininum size for hash table (must be power of 2) */
-#if !defined(NUI_MINTABLESIZE)
-# define NUI_MINTABLESIZE        4
+#if !defined(NUI_MINTABLELSIZE)
+# define NUI_MINTABLELSIZE        2
 #endif
 
 /* size of panic message buffer */
@@ -258,7 +258,7 @@ struct NUIstate {
 #define nuiM_malloc(S,s)        nuiM_realloc_(S, NULL, 0, (s))
 #define nuiM_new(S,t)           ((t*)nuiM_malloc(S, sizeof(t)))
 #define nuiM_newvector(S,n,t) \
-                ((t*)nuiM_reallocv(S, NULL, 0, n, sizeof(t)))
+                ((t*)nuiM_reallocv(S, NULL, 0, (n), sizeof(t)))
 
 #define nuiM_reallocvector(S,v,oldn,n,t) \
    ((v)=((t*)nuiM_reallocv(S, v, oldn, n, sizeof(t))))
@@ -285,7 +285,7 @@ static void *nuiM_realloc_ (NUIstate *S, void *block, size_t oldsize,
             nui_error(S, "out of memory");
     }
     nui_assert((size == 0) == (newblock == NULL));
-#if 1 /* XXX */
+#if 0 /* XXX */
     if (size > oldsize)
         printf("ALLOC: %d\n", size - oldsize);
     else if (size < oldsize)
@@ -432,7 +432,7 @@ NUIstring *nui_newlstr (NUIstate *S, const char *s, size_t len) {
          o = o->next) {
         if (   hash == o->hash &&
                 len == o->len  &&
-                (memcmp(s, (char*)(o), len*sizeof(char)) == 0))
+                (memcmp(s, (char*)(o+1), (len+1)*sizeof(char)) == 0))
             return nuiM_touser(o);
     }
     return nuiM_touser(newstring(S, s, len, hash));
@@ -501,9 +501,11 @@ static void nuiS_sweep(NUIstate *S) {
 
 /* === nui table === */
 
+#define nui_tsize(t) (1<<((t)->lsize))
+
 static int getnodeoffset(NUItable *t, NUIentry *n, size_t *psz) {
     ptrdiff_t off = n - t->node;
-    if (off < 0 || off >= t->size)
+    if (off < 0 || off >= nui_tsize(t))
         return 0;
     *psz = (size_t)off;
     return 1;
@@ -521,15 +523,15 @@ static NUIentry *getfreepos(NUItable *t) {
 static NUIentry *getnewkeynode(NUIstate *S, NUItable *t, NUIstring *key) {
     NUIentry *mp;
     if (key == NULL) return NULL;
-    mp = &t->node[nui_lmod(key->hash, t->size)];
-    if (mp->key != NULL) { /* main position is taken? */
+    mp = &t->node[nui_lmod(key->hash, nui_tsize(t))];
+    if (mp == NULL || mp->key != NULL) { /* main position is taken? */
         NUIentry *othern;
         NUIentry *n = getfreepos(t); /* get a free place */
         if (n == NULL) { /* can not find a free place? */
             nui_resizetable(S, t, nui_counttable(t)+1); /* grow table */
-            return nui_settable(S, t, key);
+            return nui_settable(S, t, nuiM_touser(key));
         }
-        othern = &t->node[nui_lmod(mp->key->hash, t->size)];
+        othern = &t->node[nui_lmod(mp->key->hash, nui_tsize(t))];
         if (othern != mp) { /* is colliding node out of its main position? */
             /* yes; move colliding node into free position */
             while (othern->next != mp) othern = othern->next; /* find previous */
@@ -544,48 +546,51 @@ static NUIentry *getnewkeynode(NUIstate *S, NUItable *t, NUIstring *key) {
             mp = n;
         }
     }
-    mp->key = key;
+    mp->key = nuiM_touser(key);
     mp->value = NULL;
     return mp;
 }
 
 void nui_inittable(NUIstate *S, NUItable *t, size_t size) {
+    size_t i, lsize = NUI_MINTABLELSIZE;
     if (size == 0) {
         t->node = NULL;
         t->lastfree = NULL;
-        t->size = 0;
+        t->lsize = 0;
+        return;
     }
-    else {
-        size_t i;
-        t->node = nuiM_newvector(S, size, NUIentry);
-        for (i = 0; i < size; ++i) {
-            NUIentry *n = &t->node[i];
-            n->next = NULL;
-            n->key = NULL;
-            n->value = NULL;
-            n->deletor = NULL;
-        }
-        t->lastfree = &t->node[size];
-        t->size = size;
+
+    while ((1<<lsize) < NUI_MAX_SIZET/2 && (1<<lsize) < size)
+        ++lsize;
+    if ((1<<lsize) >= NUI_MAX_SIZET/2)
+        nuiM_toobig(S);
+    size = 1<<lsize;
+    t->node = nuiM_newvector(S, size, NUIentry);
+    for (i = 0; i < size; ++i) {
+        NUIentry *n = &t->node[i];
+        n->next = NULL;
+        n->key = NULL;
+        n->value = NULL;
+        n->deletor = NULL;
     }
+    t->lastfree = &t->node[size];
+    t->lsize = lsize;
 }
 
 void nui_freetable(NUIstate *S, NUItable *t) {
     nui_resettable(S, t);
-    nuiM_freevector(S, t->node, t->size);
+    if (t->node != NULL)
+        nuiM_freevector(S, t->node, nui_tsize(t));
     nui_inittable(S, t, 0);
 }
 
 void nui_resizetable(NUIstate *S, NUItable *t, size_t newsize) {
+    size_t oldsize = 1<<t->lsize;
     NUIentry *node = t->node;
     size_t i;
-    size_t oldsize = t->size;
-    size_t realsize = NUI_MINTABLESIZE;
-    while (realsize < NUI_MAX_SIZET/2 && realsize < newsize)
-        realsize *= 2;
-    if (realsize >= NUI_MAX_SIZET/2)
-        nuiM_toobig(S);
-    nui_inittable(S, t, realsize);
+    nui_inittable(S, t, newsize);
+    if (node == NULL)
+        return;
     for (i = 0; i < oldsize; ++i) {
         NUIentry *old = &node[i];
         if (old->key != NULL) {
@@ -594,21 +599,23 @@ void nui_resizetable(NUIstate *S, NUItable *t, size_t newsize) {
             new->deletor = old->deletor;
         }
     }
-    if (node != NULL)
-        nuiM_freevector(S, node, oldsize);
+    nuiM_freevector(S, node, oldsize);
 }
 
 void nui_resettable(NUIstate *S, NUItable *t) {
-    size_t i;
-    for (i = 0; i < t->size; ++i)
-        nui_deltable(S, &t->node[i]);
+    if (t->node != NULL) {
+        size_t i, size = nui_tsize(t);
+        for (i = 0; i < size; ++i)
+            nui_deltable(S, &t->node[i]);
+    }
 }
 
 NUIentry *nui_gettable(NUItable *t, NUIstring *key) {
     NUIentry *n;
-    if (t->size == 0)
-        return NULL;
-    n = &t->node[nui_lmod(key->hash, t->size)];
+    unsigned hash;
+    if (key == NULL) return NULL;
+    hash = nuiM_fromuser(key)->hash;
+    n = &t->node[nui_lmod(hash, nui_tsize(t))];
     for (; n != NULL; n = n->next)
         if (n->key == key)
             return n;
@@ -617,11 +624,9 @@ NUIentry *nui_gettable(NUItable *t, NUIstring *key) {
 
 NUIentry *nui_settable(NUIstate *S, NUItable *t, NUIstring *key) {
     NUIentry *n = nui_gettable(t, key);
-    if (n != NULL)
-        return n;
-    if (t->size == 0)
-        nui_resizetable(S, t, NUI_MINTABLESIZE);
-    return getnewkeynode(S, t, key);
+    if (n != NULL) return n;
+    if (key == NULL) return NULL;
+    return getnewkeynode(S, t, nuiM_fromuser(key));
 }
 
 void nui_deltable(NUIstate *S, NUIentry *n) {
@@ -640,19 +645,22 @@ void nui_deltable(NUIstate *S, NUIentry *n) {
 
 size_t nui_counttable(NUItable *t) {
     size_t i, count = 0;
-    for (i = 0; i < t->size; ++i)
-        if (t->node[i].key != NULL)
-            ++count;
+    if (t->node != NULL) {
+        size_t size = nui_tsize(t);
+        for (i = 0; i < size; ++i)
+            if (t->node[i].key != NULL)
+                ++count;
+    }
     return count;
 }
 
 NUIentry *nui_nextentry(NUItable *t, NUIentry *n) {
-    size_t i;
+    size_t i, size = nui_tsize(t);
     if (n == NULL)
         i = 0;
     else if (!getnodeoffset(t, n, &i))
         return NULL;
-    for (; i < t->size; ++i) {
+    for (; i < size; ++i) {
         NUIentry *n = &t->node[i];
         if (n->key != NULL)
             return n;
@@ -870,17 +878,15 @@ void nuiA_updateactions(NUIstate *S) {
 #define NUI_NEXT next_sibling
 
 static void node_setparent(NUInode *n, NUInode *parent) {
-    if (n->klass) {
-        if (n->parent && n->parent != parent) {
-            if (n->klass->child_removed)
-                n->klass->child_removed(n->parent, n);
-            n->parent = NULL;
-        }
-        if (parent) {
-            if (n->klass->child_added)
-                n->klass->child_added(parent, n);
-            n->parent = parent;
-        }
+    if (n->parent && n->parent != parent) {
+        if (n->klass->child_removed)
+            n->klass->child_removed(n->parent, n);
+        n->parent = NULL;
+    }
+    if (parent) {
+        if (n->klass->child_added)
+            n->klass->child_added(parent, n);
+        n->parent = parent;
     }
 }
 
@@ -888,23 +894,27 @@ static void node_delete(NUIstate *S, NUInode *n) {
     size_t totalsize = sizeof(NUInode) + n->klass->node_extra_size;
     node_setparent(n, NULL);
     nuiL_remove_safe(n);
-    if (n->klass && n->klass->delete_node)
+    if (n->klass->delete_node)
         n->klass->delete_node(n);
     nui_freetable(n->klass->state, &n->table);
     nuiM_freemem(S, n, totalsize);
 }
 
 NUInode *nui_node(NUIstate *S, NUIstring *classname, void **params) {
+    NUInode *n;
     NUIentry *klass_entry = nui_gettable(&S->classes, classname);
-    NUIclass *klass = (NUIclass*)(klass_entry == NULL ? NULL : klass_entry->value);
+    NUIclass *klass = klass_entry ?
+        (NUIclass*)klass_entry->value : S->default_class;
     size_t totalsize = sizeof(NUInode) + klass->node_extra_size;
-    NUInode *n = (NUInode*)nuiM_malloc(S, totalsize);
+
+    n = (NUInode*)nuiM_malloc(S, totalsize);
     nuiL_init(n);
+    n->klass = klass;
     n->next = klass->all_nodes;
     klass->all_nodes = n;
+
     n->parent = NULL;
     n->children = NULL;
-    n->klass = klass;
     nui_inittable(S, &n->table, 0);
     n->pos.x = n->pos.y = 0;
     n->size.width = n->size.height = 0;
@@ -912,8 +922,7 @@ NUInode *nui_node(NUIstate *S, NUIstring *classname, void **params) {
     n->id = 0;
     n->flags = 0;
     n->handle = NULL;
-    if (n->klass && n->klass->new_node
-            && !n->klass->new_node(n, params)) {
+    if (n->klass->new_node && !n->klass->new_node(n, params)) {
         nuiM_freemem(S, n, totalsize);
         return NULL;
     }
@@ -976,8 +985,7 @@ void nui_detach(NUInode *n) {
 }
 
 NUInode* nui_parent(NUInode *n) {
-    if (n->klass
-            && n->klass->get_parent)
+    if (n->klass->get_parent)
         return n->klass->get_parent(n);
     return n->parent;
 }
@@ -1046,44 +1054,38 @@ NUIpoint nui_abspos(NUInode *n) {
 
 NUIsize nui_naturalsize(NUInode *n) {
     NUIsize size;
-    if (n->klass
-            && n->klass->layout_naturalsize
+    if (n->klass->layout_naturalsize
             && n->klass->layout_naturalsize(n, &size))
         return size;
     return n->size;
 }
 
 void nui_move(NUInode *n, NUIpoint pos) {
-    if (n->klass
-            && n->klass->node_move
+    if (n->klass->node_move
             && n->klass->node_move(n, pos))
         n->pos = pos;
 }
 
 void nui_resize(NUInode *n, NUIsize size) {
-    if (n->klass
-            && n->klass->node_resize
+    if (n->klass->node_resize
             && n->klass->node_resize(n, size))
         n->size = size;
 }
 
 void nui_show(NUInode *n) {
-    if (n->klass
-            && n->klass->node_show
+    if (n->klass->node_show
             && n->klass->node_show(n))
         n->visible = 1;
 }
 
 void nui_hide(NUInode *n) {
-    if (n->klass
-            && n->klass->node_hide
+    if (n->klass->node_hide
             && n->klass->node_hide(n))
         n->visible = 0;
 }
 
 void *nui_gethandle(NUInode *n) {
-    if (n->klass
-            && n->klass->get_handle)
+    if (n->klass->get_handle)
         return n->klass->get_handle(n);
     return n->handle;
 }
@@ -1130,6 +1132,7 @@ static int call_delattr(NUInode *n, NUItable *t, NUIstring *key) {
 int nui_getattr(NUInode *n, NUIstring *key, NUIvalue *pv) {
     int res;
     NUIclass *klass = n->klass;
+    NUIclass *defklass;
     if ((res = call_getattr(n, &n->table, key, pv)) != 0)
         return res;
     while (klass != NULL) {
@@ -1139,11 +1142,10 @@ int nui_getattr(NUInode *n, NUIstring *key, NUIvalue *pv) {
             return klass->getattr(n, key, pv);
         klass = klass->parent;
     }
-    if (n->klass && n->klass->state->default_class) {
-        NUItable *def_attrtable = &n->klass->state->default_class->attrib_table;
-        if ((res = call_getattr(n, def_attrtable, key, pv)) != 0)
-            return res;
-    }
+    defklass = n->klass->state->default_class;
+    if (n->klass != defklass &&
+            (res = call_getattr(n, &defklass->attrib_table, key, pv)) != 0)
+        return res;
     if (pv) {
         pv->type = NUI_TPOINTER;
         pv->u.pointer = NULL;
@@ -1154,6 +1156,7 @@ int nui_getattr(NUInode *n, NUIstring *key, NUIvalue *pv) {
 int nui_setattr(NUInode *n, NUIstring *key, NUIvalue v) {
     int res;
     NUIclass *klass = n->klass;
+    NUIclass *defklass;
     if ((res = call_setattr(n, &n->table, key, &v)) != 0)
         return res;
     while (klass != NULL) {
@@ -1163,17 +1166,17 @@ int nui_setattr(NUInode *n, NUIstring *key, NUIvalue v) {
             return klass->setattr(n, key, &v);
         klass = klass->parent;
     }
-    if (n->klass && n->klass->state->default_class) {
-        NUItable *def_attrtable = &n->klass->state->default_class->attrib_table;
-        if ((res = call_setattr(n, def_attrtable, key, &v)) != 0)
-            return res;
-    }
+    defklass = n->klass->state->default_class;
+    if (n->klass != defklass &&
+            (res = call_setattr(n, &defklass->attrib_table, key, &v)) != 0)
+        return res;
     return 0;
 }
 
 int nui_delattr(NUInode *n, NUIstring *key) {
     int res;
     NUIclass *klass = n->klass;
+    NUIclass *defklass;
     if ((res = call_delattr(n, &n->table, key)) != 0)
         return res;
     while (klass != NULL) {
@@ -1183,11 +1186,10 @@ int nui_delattr(NUInode *n, NUIstring *key) {
             return klass->delattr(n, key);
         klass = klass->parent;
     }
-    if (n->klass && n->klass->state->default_class) {
-        NUItable *def_attrtable = &n->klass->state->default_class->attrib_table;
-        if ((res = call_delattr(n, def_attrtable, key)) != 0)
-            return res;
-    }
+    defklass = n->klass->state->default_class;
+    if (n->klass != defklass &&
+            (res = call_delattr(n, &defklass->attrib_table, key)) != 0)
+        return res;
     return 0;
 }
 
@@ -1247,8 +1249,11 @@ static void attrib_deletor(NUIstate *S, void *p) {
 }
 
 NUIclass *nui_newclass(NUIstate *S, NUIstring *classname, size_t sz) {
-    NUIentry *klass_entry = nui_gettable(&S->classes, classname);
+    NUIentry *klass_entry;
     NUIclass *klass;
+    if (classname == NULL)
+        classname = S->predefs[NUI_IDX_default];
+    klass_entry = nui_gettable(&S->classes, classname);
     if (klass_entry != NULL)
         return nuiM_touser((NUIclass*)klass_entry->value);
     klass = nuiM_malloc(S, sizeof(NUIclass) + sz);
@@ -1257,7 +1262,7 @@ NUIclass *nui_newclass(NUIstate *S, NUIstring *classname, size_t sz) {
     klass_entry->value = (void*)klass;
     klass_entry->deletor = class_deletor;
     klass->name = classname;
-    klass->parent = NULL; /* XXX */
+    klass->parent = NULL;
     klass->state = S;
     nui_inittable(S, &klass->attrib_table, 0);
     klass->all_nodes = NULL;
@@ -1427,4 +1432,5 @@ int nui_loop(NUIstate *S) {
 }
 
 
-/* cc: flags+='-s -O3 -mdll -DNUI_DLL -Wl,--output-def,nui.def' output='nui.dll' */
+/* cc: flags+='-ggdb -O3 -mdll -DNUI_DLL -Wl,--output-def,nui.def'
+ * cc: output='nui.dll' run='nui_test' */

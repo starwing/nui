@@ -41,7 +41,7 @@ struct NUIentry {
 };
 
 struct NUItable {
-    size_t size;
+    size_t lsize;
     NUIentry *node;
     NUIentry *lastfree;
 };
