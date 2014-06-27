@@ -177,7 +177,7 @@ struct NUIaction {
     NUIaction *prev_linked;
 
     NUIactionf *f;
-    NUIactionf *deletor;
+    NUIdeletor *deletor;
     NUInode *n;
     unsigned trigger_time;
     unsigned interval;
@@ -212,6 +212,7 @@ struct NUInode {
 
 struct NUIstate {
     NUIparams *params;
+    int is_closing;
 
     /* memory alloc */
     size_t totalmem;
@@ -675,14 +676,17 @@ NUIentry *nui_nextentry(NUItable *t, NUIentry *n) {
 #define NUI_NEXT next_linked
 
 NUIaction *nui_action(NUIstate *S, NUIactionf *f, size_t sz) {
-    NUIaction *a = (NUIaction*)nuiM_malloc(S, sizeof(NUIaction) + sz);
-    nuiL_insert_pointer(S->actions, a);
+    NUIaction *a;
+    if (S->is_closing)
+        return NULL;
+    a = (NUIaction*)nuiM_malloc(S, sizeof(NUIaction) + sz);
     a->f = f;
     a->deletor = NULL;
     a->n = NULL;
     a->trigger_time = 0;
     a->interval = 0;
     a->extra_size = sz;
+    nuiL_insert_pointer(S->actions, a);
     return nuiM_touser(a);
 }
 
@@ -690,6 +694,7 @@ NUIaction *nui_copyaction(NUIstate *S, NUIaction *a) {
     NUIaction *copied;
     a = nuiM_fromuser(a);
     copied = nui_action(S, a->f, a->extra_size);
+    if (copied == NULL) return NULL;
     copied->deletor = a->deletor;
     return nuiM_touser(copied);
 }
@@ -717,20 +722,16 @@ void nui_dropaction(NUIstate *S, NUIaction *a) {
     nuiL_insert_pointer(S->dead_actions, a);
 }
 
-size_t nui_actionbuffsize(NUIaction *a) {
-    a = nuiM_fromuser(a);
-    return a->extra_size;
+size_t nui_actionsize(NUIaction *a) {
+    return nuiM_fromuser(a)->extra_size;
 }
 
 void nui_linkaction(NUIaction *a, NUIaction *na) {
-    a = nuiM_fromuser(a);
-    na = nuiM_fromuser(na);
-    nuiL_insert(a, na);
+    nuiL_insert(nuiM_fromuser(a), nuiM_fromuser(na));
 }
 
 void nui_unlinkaction(NUIaction *a) {
-    a = nuiM_fromuser(a);
-    nuiL_remove_safe(a);
+    nuiL_remove_safe(nuiM_fromuser(a));
 }
 
 NUIaction *nui_nextaction(NUIaction *a, NUIaction *curr) {
@@ -809,9 +810,17 @@ void nui_canceltimer(NUIstate *S, NUIaction *a) {
     a->trigger_time = 0;
 }
 
-static void nuiA_sweep(NUIstate *S) {
-    while (S->dead_actions)
-        nui_dropaction(S, S->dead_actions);
+static void action_sweeplist(NUIstate *S, NUIaction **list) {
+    while (*list != NULL) {
+        NUIaction *a = *list, *next;
+        next = (a == NULL || nuiL_empty(a)) ?  NULL : nuiL_next(a);
+        size_t totalsize = sizeof(NUIaction) + a->extra_size;
+        if (a->deletor)
+            a->deletor(S, nuiM_touser(a));
+        nuiL_remove(a);
+        nuiM_freemem(S, a, totalsize);
+        *list = next;
+    }
 }
 
 static void nuiA_open(NUIstate *S) {
@@ -822,15 +831,16 @@ static void nuiA_open(NUIstate *S) {
     S->dead_actions = NULL;
 }
 
+static void nuiA_sweep(NUIstate *S) {
+    action_sweeplist(S, &S->dead_actions);
+}
+
 static void nuiA_close(NUIstate *S) {
     nui_freetable(S, &S->named_actions);
-    nuiA_sweep(S);
-    while (S->actions)
-        nui_dropaction(S, S->actions);
-    while (S->sched_actions)
-        nui_dropaction(S, S->sched_actions);
-    while (S->timed_actions)
-        nui_dropaction(S, S->timed_actions);
+    action_sweeplist(S, &S->actions);
+    action_sweeplist(S, &S->sched_actions);
+    action_sweeplist(S, &S->timed_actions);
+    action_sweeplist(S, &S->dead_actions);
 }
 
 unsigned nuiA_remaintime(NUIstate *S) {
@@ -1349,6 +1359,7 @@ NUIstate *nui_newstate(NUIparams *params) {
         params->deletor = params_deletor;
     }
     S->params = params;
+    S->is_closing = 0;
     nuiS_open(S); /* open string pool support */
     nuiA_open(S); /* open action support */
     nuiC_open(S); /* open class support */
@@ -1356,6 +1367,7 @@ NUIstate *nui_newstate(NUIparams *params) {
 }
 
 void nui_close(NUIstate *S) {
+    S->is_closing = 1;
     nuiC_close(S); /* close class support */
     nuiA_close(S); /* close action support */
     nuiS_close(S); /* close string pool */
