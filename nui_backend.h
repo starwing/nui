@@ -66,34 +66,34 @@ struct NUIclass {
     /* creation/destroy */
     void (*deletor) (NUIstate *S, NUIclass *c);
 
-    int  (*new_node)    (NUInode *n, void **ptrs);
-    void (*delete_node) (NUInode *n);
+    int  (*new_node)    (NUIclass *c, NUInode *n, void **ptrs);
+    void (*delete_node) (NUIclass *c, NUInode *n);
 
     /* default accessor */
-    int (*getattr) (NUInode *n, NUIstring *key, NUIvalue *pv);
-    int (*setattr) (NUInode *n, NUIstring *key, NUIvalue *pv);
-    int (*delattr) (NUInode *n, NUIstring *key);
+    int (*getattr) (NUIclass *c, NUInode *n, NUIstring *key, NUIvalue *pv);
+    int (*setattr) (NUIclass *c, NUInode *n, NUIstring *key, NUIvalue *pv);
+    int (*delattr) (NUIclass *c, NUInode *n, NUIstring *key);
 
     /* for map/unmap */
-    int (*map)   (NUInode *n);
-    int (*unmap) (NUInode *n);
+    int (*map)   (NUIclass *c, NUInode *n);
+    int (*unmap) (NUIclass *c, NUInode *n);
 
-    NUInode* (*get_parent) (NUInode *n);
-    void*    (*get_handle) (NUInode *n);
+    NUInode* (*get_parent) (NUIclass *c, NUInode *n, NUInode *parent);
+    void*    (*get_handle) (NUIclass *c, NUInode *n, void *handle);
 
     /* events */
-    void (*child_added)    (NUInode *n, NUInode *child);
-    void (*child_removed)  (NUInode *n, NUInode *child);
+    void (*child_added)    (NUIclass *c, NUInode *n, NUInode *child);
+    void (*child_removed)  (NUIclass *c, NUInode *n, NUInode *child);
 
     /* node operations */
-    int (*node_show)   (NUInode *n);
-    int (*node_hide)   (NUInode *n);
-    int (*node_move)   (NUInode *n, NUIpoint pos);
-    int (*node_resize) (NUInode *n, NUIsize size);
+    int (*node_show)   (NUIclass *c, NUInode *n);
+    int (*node_hide)   (NUIclass *c, NUInode *n);
+    int (*node_move)   (NUIclass *c, NUInode *n, NUIpoint pos);
+    int (*node_resize) (NUIclass *c, NUInode *n, NUIsize size);
 
     /* layout */
-    int (*layout_update)  (NUInode *n);
-    int (*layout_naturalsize) (NUInode *n, NUIsize *psz);
+    int (*layout_update)      (NUIclass *c, NUInode *n);
+    int (*layout_naturalsize) (NUIclass *c, NUInode *n, NUIsize *psz);
 };
 
 NUI_API n_noret nui_error(NUIstate *S, const char *fmt, ...);
@@ -102,6 +102,8 @@ NUI_API NUIstate  *nui_newstate(NUIparams *params);
 NUI_API NUIclass  *nui_newclass(NUIstate *S, NUIstring *class_name, size_t sz);
 NUI_API NUIattrib *nui_newattrib(NUIstate *S, NUIclass *klass, NUIstring *key);
 NUI_API NUIaction *nui_newnamedaction(NUIstate *S, NUIstring *name, NUIactionf *f, size_t sz);
+
+NUI_API NUIclass *nui_nodeclass(NUInode *n);
 
 
 /* === table API === */
