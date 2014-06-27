@@ -112,7 +112,7 @@ NUI_API void nui_canceltimer(NUIstate *S, NUIaction *a);
 
 /* node */
 NUI_API NUInode *nui_node(NUIstate *S, NUIstring *class_name, void **params);
-NUI_API int nui_dropnode(NUInode *n);
+NUI_API void nui_dropnode(NUInode *n);
 
 NUI_API NUIstring *nui_classname(NUInode *n);
 NUI_API int nui_matchclass(NUInode *n, NUIstring *class_name);
