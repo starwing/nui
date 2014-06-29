@@ -1,5 +1,4 @@
 /* NUI - a native, node-based UI library */
-
 #ifndef nui_h
 #define nui_h
 
@@ -20,16 +19,16 @@
 #endif
 
 
-#define NUI_VALUE_TYPES(X) /* X(name, type, varname) */ \
-    X( POINTER,  void*,       pointer  ) \
-    X( ACTION,   NUIaction*,  action   ) \
-    X( NODE,     NUInode*,    node     ) \
-    X( STRING,   NUIstring*,  string   ) \
-    X( CALLBACK, NUIfuncptr,  callback ) \
-    X( NUMBER,   double,      number   ) \
-    X( INTEGER,  long,        integer  ) \
-    X( POINT,    NUIpoint,    point    ) \
-    X( SIZE,     NUIsize,     size     ) \
+#define NUI_VALUE_TYPES(X) \
+    X(POINTER,   void*,       pointer  ) \
+    X(NUMBER,    double,      number   ) \
+    X(INTEGER,   long,        integer  ) \
+    X(FUNCTION,  NUIfuncptr*, function ) \
+    X(POINT,     NUIpoint,    point    ) \
+    X(SIZE,      NUIsize,     size     ) \
+    X(ACTION,    NUIaction*,  action   ) \
+    X(NODE,      NUInode*,    node     ) \
+    X(STRING,    NUIstring*,  string   ) \
 
 
 typedef struct NUIstate  NUIstate;
@@ -48,27 +47,29 @@ typedef struct NUIsize {
 } NUIsize;
 
 typedef enum NUItype {
-#define X(name,type,var) NUI_T##name,
+    NUI_TNIL,
+#define X(name, type, var) NUI_T##name,
     NUI_VALUE_TYPES(X)
 #undef  X
+    NUI_TARGSEND,
     NUI_TYPE_COUNT
 } NUItype;
 
 typedef struct NUIvalue {
     NUItype type;
     union {
-#define X(name,type,var) type var;
+#define X(name, type, var) type var;
         NUI_VALUE_TYPES(X)
 #undef  X
-    } u;
+    };
 } NUIvalue;
 
-
-typedef void NUIactionf(NUIstate *S, NUIaction *a, NUInode *n, void **params);
+typedef void NUIactionf(NUIstate *S, NUIaction *a, NUInode *n, NUIvalue *v);
 
 
 /* destroy */
 NUI_API void nui_close(NUIstate *S);
+
 
 /* string */
 NUI_API NUIstring *nui_string  (NUIstate *S, const char *s);
@@ -91,31 +92,37 @@ NUI_API void nui_breakloop(NUIstate *S);
 NUI_API unsigned nui_time(NUIstate *S);
 
 NUI_API NUIaction *nui_action(NUIstate *S, NUIactionf *f, size_t sz);
-NUI_API NUIaction *nui_copyaction(NUIstate *S, NUIaction *a);
 NUI_API NUIaction *nui_namedaction(NUIstate *S, NUIstring *name);
-NUI_API void nui_dropaction(NUIstate *S, NUIaction *a);
+NUI_API void nui_dropaction(NUIaction *a);
 
+NUI_API NUIaction *nui_copyaction(NUIaction *a);
 NUI_API size_t nui_actionsize(NUIaction *a);
 
+NUI_API void nui_actionf(NUIaction *a, NUIactionf *f);
+NUI_API void nui_actionnode(NUIaction *a, NUInode *n);
+NUI_API void nui_actiondelayed(NUIaction *a, unsigned delayed);
+NUI_API void nui_actioninterval(NUIaction *a, unsigned interval);
+
 NUI_API void nui_linkaction(NUIaction *a, NUIaction *newa);
-NUI_API void nui_unlinkaction(NUIaction *a);
+NUI_API void nui_unlinkaction(NUIstate *S, NUIaction *a);
 
 NUI_API NUIaction *nui_nextaction(NUIaction *a, NUIaction *curr);
 
-NUI_API void nui_setactionf(NUIaction *a, NUIactionf *f);
-NUI_API void nui_emitaction(NUIstate *S, NUIaction *a, NUInode *n, void **params);
-NUI_API void nui_schedaction(NUIstate *S, NUIaction *a, NUInode *n);
+NUI_API void nui_emit(NUIstate *S, NUIaction *a, NUIvalue *args);
 
-NUI_API void nui_starttimer(NUIstate *S, NUIaction *a, NUInode *n, unsigned delayed, unsigned interval);
+NUI_API void nui_starttimer(NUIstate *S, NUIaction *a, NUIvalue *args);
 NUI_API void nui_canceltimer(NUIstate *S, NUIaction *a);
 
 
 /* node */
-NUI_API NUInode *nui_node(NUIstate *S, NUIstring *class_name, void **params);
+NUI_API NUInode *nui_node(NUIstate *S, NUIstring *class_name, NUIvalue *args);
 NUI_API void nui_dropnode(NUInode *n);
 
 NUI_API NUIstring *nui_classname(NUInode *n);
 NUI_API int nui_matchclass(NUInode *n, NUIstring *class_name);
+
+NUI_API int nui_mapnode   (NUInode *n);
+NUI_API int nui_unmapnode (NUInode *n);
 
 NUI_API NUInode *nui_parent(NUInode *n);
 NUI_API NUInode *nui_firstchild(NUInode *n);
@@ -174,17 +181,26 @@ NUI_API void       nui_setaction(NUInode *n, NUIaction *a);
 # endif
 #endif /* NUI_INLINE */
 
+NUI_INLINE NUIvalue nui_nilvalue(void) {
+    NUIvalue v;
+    v.type = NUI_TNIL;
+    return v;
+}
+
+NUI_INLINE NUIvalue nui_argsend(void) {
+    NUIvalue v;
+    v.type = NUI_TARGSEND;
+    return v;
+}
+
 #define X(name, vtype, var) \
     NUI_INLINE NUIvalue nui_##var##value(vtype var) { \
         NUIvalue v;                                   \
         v.type = NUI_T##name;                         \
-        v.u.var = var;                                \
+        v.var = var;                                  \
         return v;                                     \
     }
-
 NUI_VALUE_TYPES(X)
-
 #undef X
-
 
 #endif /* nui_h */

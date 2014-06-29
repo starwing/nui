@@ -21,6 +21,7 @@ typedef struct NUItable NUItable;
 typedef struct NUIattrib NUIattrib;
 typedef struct NUIclass NUIclass;
 typedef struct NUIparams NUIparams;
+
 typedef void NUIdeletor(NUIstate *S, void *p);
 
 
@@ -47,17 +48,16 @@ struct NUItable {
 };
 
 struct NUIattrib {
-    NUIstring *key;
-    NUInode *node;
-    int (*getattr) (NUIattrib *attr, NUIvalue *pv);
-    int (*setattr) (NUIattrib *attr, NUIvalue *pv);
-    int (*delattr) (NUIattrib *attr);
+    size_t extra_size;
+    int (*getattr) (NUIattrib *attrib, NUInode *n, NUIstring *key, NUIvalue *v);
+    int (*setattr) (NUIattrib *attrib, NUInode *n, NUIstring *key, NUIvalue *v);
+    int (*delattr) (NUIattrib *attrib, NUInode *n, NUIstring *key);
 };
 
 struct NUIclass {
+    NUIstate *S;
     NUIstring *name;
     NUIclass *parent;
-    NUIstate *state;
     NUInode *all_nodes;
     size_t class_extra_size;
     size_t node_extra_size;
@@ -66,7 +66,7 @@ struct NUIclass {
     /* creation/destroy */
     void (*deletor) (NUIstate *S, NUIclass *c);
 
-    int  (*new_node)    (NUIclass *c, NUInode *n, void **ptrs);
+    int  (*new_node)    (NUIclass *c, NUInode *n, NUIvalue *v);
     void (*delete_node) (NUIclass *c, NUInode *n);
 
     /* default accessor */
@@ -100,7 +100,8 @@ NUI_API n_noret nui_error(NUIstate *S, const char *fmt, ...);
 
 NUI_API NUIstate  *nui_newstate(NUIparams *params);
 NUI_API NUIclass  *nui_newclass(NUIstate *S, NUIstring *class_name, size_t sz);
-NUI_API NUIattrib *nui_newattrib(NUIstate *S, NUIclass *klass, NUIstring *key);
+NUI_API NUIattrib *nui_newattrib(NUIstate *S, NUIclass *klass, NUIstring *key, size_t sz);
+NUI_API NUIattrib *nui_newnodeattrib(NUIstate *S, NUInode *n, NUIstring *key, size_t sz);
 NUI_API NUIaction *nui_newnamedaction(NUIstate *S, NUIstring *name, NUIactionf *f, size_t sz);
 
 NUI_API NUIclass *nui_nodeclass(NUInode *n);
