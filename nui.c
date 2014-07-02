@@ -187,8 +187,8 @@ struct NUIstring {
 };
 
 struct NUIaction {
-    NUIaction **pprev; /* point to the `next` pointer of prev actions */
     NUIaction *next;
+    NUIaction **pprev; /* point to the `next` pointer of prev actions */
     NUIaction *next_linked;
     NUIaction *prev_linked;
 
@@ -199,6 +199,8 @@ struct NUIaction {
     NUIstate *S;
     NUInode *n;
 
+    unsigned call_count;
+    unsigned last_trigger_time;
     unsigned trigger_time;
     unsigned interval;
 };
@@ -834,13 +836,15 @@ NUIaction *nui_action(NUIstate *S, NUIactionf *f, size_t sz) {
     a = (NUIaction*)nuiM_malloc(S, sizeof(NUIaction) + sz);
     nuiHL_init(S->actions, a);
     nuiL_init(a);
-    a->S = S;
+    a->size = sz;
     a->f = f;
     a->deletor = NULL;
+    a->S = S;
     a->n = NULL;
+    a->call_count = 0;
+    a->last_trigger_time = 0;
     a->trigger_time = 0;
     a->interval = 0;
-    a->size = sz;
     return touser(a);
 }
 
@@ -892,7 +896,10 @@ void nui_actiondelayed(NUIaction *a, unsigned delayed) {
 }
 
 void nui_linkaction(NUIaction *a, NUIaction *na) {
-    nuiL_insert(todata(a), todata(na));
+    a = todata(a);
+    na = todata(na);
+    nuiL_remove(a);
+    nuiL_insert(a, na);
 }
 
 void nui_unlinkaction(NUIaction *a) {
@@ -902,10 +909,7 @@ void nui_unlinkaction(NUIaction *a) {
 
 NUIaction *nui_nextaction(NUIaction *a, NUIaction *curr) {
     a = todata(a);
-    if (curr == NULL)
-        curr = a;
-    else
-        curr = todata(curr);
+    curr = (curr == NULL) ? a : todata(curr);
     if (nuiL_next(curr) == a)
         return NULL;
     return touser(nuiL_next(curr));
@@ -1010,10 +1014,18 @@ void nuiA_updateactions(NUIstate *S) {
         unsigned time = nui_time(S);
         S->timed_actions = NULL;
         while (a != NULL && a->trigger_time <= time) {
-            /* XXX */
             NUIaction *next = a->next;
-            nui_settop(S, 0);
-            nui_emitaction(touser(a), 0);
+            nui_pushvalue(S, nui_integervalue(time - a->last_trigger_time));
+            nui_pushvalue(S, nui_integervalue(a->call_count));
+            nui_emitaction(touser(a), 2);
+            if (a->next == next) { /* a is still in list? */
+                if (a->interval != 0)
+                    nui_starttimer(touser(a), a->interval, a->interval);
+                else
+                    nui_stoptimer(touser(a));
+            }
+            a->last_trigger_time = a->trigger_time;
+            ++a->call_count;
             a = next;
         }
     }
