@@ -18,7 +18,7 @@
 
 typedef struct NUIentry NUIentry;
 typedef struct NUItable NUItable;
-typedef struct NUIattrib NUIattrib;
+typedef struct NUIattr  NUIattr;
 typedef struct NUIclass NUIclass;
 typedef struct NUIparams NUIparams;
 
@@ -47,11 +47,11 @@ struct NUItable {
     NUIentry *lastfree;
 };
 
-struct NUIattrib {
-    size_t extra_size;
-    int (*getattr) (NUIattrib *attrib, NUInode *n, NUIstring *key, NUIvalue *v);
-    int (*setattr) (NUIattrib *attrib, NUInode *n, NUIstring *key, NUIvalue *v);
-    int (*delattr) (NUIattrib *attrib, NUInode *n, NUIstring *key);
+struct NUIattr {
+    size_t size;
+    void (*deletor) (NUIattr *attr);
+    int (*getattr) (NUIattr *attr, NUInode *n, NUIstring *key, NUIvalue *v);
+    int (*setattr) (NUIattr *attr, NUInode *n, NUIstring *key, NUIvalue *v);
 };
 
 struct NUIclass {
@@ -59,24 +59,23 @@ struct NUIclass {
     NUIstring *name;
     NUIclass *parent;
     NUInode *all_nodes;
-    size_t class_extra_size;
-    size_t node_extra_size;
-    NUItable attrib_table;
+    size_t class_size;
+    size_t node_size;
+    NUItable attrs;
 
     /* creation/destroy */
     void (*deletor) (NUIstate *S, NUIclass *c);
 
-    int  (*new_node)    (NUIclass *c, NUInode *n, NUIvalue *v);
+    int  (*new_node)    (NUIclass *c, NUInode *n);
     void (*delete_node) (NUIclass *c, NUInode *n);
 
     /* default accessor */
     int (*getattr) (NUIclass *c, NUInode *n, NUIstring *key, NUIvalue *pv);
     int (*setattr) (NUIclass *c, NUInode *n, NUIstring *key, NUIvalue *pv);
-    int (*delattr) (NUIclass *c, NUInode *n, NUIstring *key);
 
     /* for map/unmap */
-    int (*map)   (NUIclass *c, NUInode *n);
-    int (*unmap) (NUIclass *c, NUInode *n);
+    void *(*map)   (NUIclass *c, NUInode *n);
+    int   (*unmap) (NUIclass *c, NUInode *n, void *handle);
 
     NUInode* (*get_parent) (NUIclass *c, NUInode *n, NUInode *parent);
     void*    (*get_handle) (NUIclass *c, NUInode *n, void *handle);
@@ -100,11 +99,20 @@ NUI_API n_noret nui_error(NUIstate *S, const char *fmt, ...);
 
 NUI_API NUIstate  *nui_newstate(NUIparams *params);
 NUI_API NUIclass  *nui_newclass(NUIstate *S, NUIstring *class_name, size_t sz);
-NUI_API NUIattrib *nui_newattrib(NUIstate *S, NUIclass *klass, NUIstring *key, size_t sz);
-NUI_API NUIattrib *nui_newnodeattrib(NUIstate *S, NUInode *n, NUIstring *key, size_t sz);
 NUI_API NUIaction *nui_newnamedaction(NUIstate *S, NUIstring *name, NUIactionf *f, size_t sz);
 
+NUI_API NUIparams *nui_stateparams(NUIstate *S);
+
+NUI_API NUIattr *nui_newattr(NUIclass *c, NUIstring *key, size_t sz);
+NUI_API NUIattr *nui_newnodeattr(NUInode *n, NUIstring *key, size_t sz);
+
+NUI_API void nui_delattr(NUIclass *c, NUIstring *key);
+NUI_API void nui_delnodeattr(NUInode *n, NUIstring *key);
+
 NUI_API NUIclass *nui_nodeclass(NUInode *n);
+
+NUI_API void nui_setactiondeletor(NUIaction *a, NUIdeletor *f);
+NUI_API NUIdeletor *nui_getactiondeletor(NUIaction *a);
 
 
 /* === table API === */

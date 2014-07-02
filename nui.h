@@ -64,7 +64,7 @@ typedef struct NUIvalue {
     };
 } NUIvalue;
 
-typedef void NUIactionf(NUIstate *S, NUIaction *a, NUInode *n, NUIvalue *v);
+typedef void NUIactionf(NUIstate *S, NUIaction *a, NUInode *n);
 
 
 /* destroy */
@@ -77,10 +77,20 @@ NUI_API NUIstring *nui_newlstr (NUIstate *S, const char *s, size_t len);
 NUI_API int nui_holdstring (NUIstate *S, NUIstring *s);
 NUI_API int nui_dropstring (NUIstate *S, NUIstring *s);
 
+NUI_API size_t   nui_strlen   (NUIstring *s);
+NUI_API unsigned nui_strhash  (NUIstring *s);
 NUI_API unsigned nui_calchash (NUIstate *S, const char *s, size_t len);
 
-NUI_API size_t      nui_len(NUIstring *s);
-NUI_API unsigned    nui_hash(NUIstring *s);
+
+/* action arguments stack */
+
+NUI_API int  nui_gettop(NUIstate *S);
+NUI_API void nui_settop(NUIstate *S, int idx);
+NUI_API int  nui_pushvalue(NUIstate *S, NUIvalue v);
+NUI_API int  nui_setvalue(NUIstate *S, int idx, NUIvalue v);
+NUI_API int  nui_getvalue(NUIstate *S, int idx, NUIvalue *pv);
+NUI_API void nui_rotate(NUIstate *S, int idx, int n);
+NUI_API int  nui_copyvalues(NUIstate *S, int idx);
 
 
 /* loop & action */
@@ -98,24 +108,24 @@ NUI_API void nui_dropaction(NUIaction *a);
 NUI_API NUIaction *nui_copyaction(NUIaction *a);
 NUI_API size_t nui_actionsize(NUIaction *a);
 
-NUI_API void nui_actionf(NUIaction *a, NUIactionf *f);
-NUI_API void nui_actionnode(NUIaction *a, NUInode *n);
-NUI_API void nui_actiondelayed(NUIaction *a, unsigned delayed);
-NUI_API void nui_actioninterval(NUIaction *a, unsigned interval);
+NUI_API void nui_setactionf(NUIaction *a, NUIactionf *f);
+NUI_API NUIactionf *nui_getactionf(NUIaction *a);
+NUI_API void nui_setactionnode(NUIaction *a, NUInode *n);
+NUI_API NUInode *nui_getactionnode(NUIaction *a);
 
 NUI_API void nui_linkaction(NUIaction *a, NUIaction *newa);
-NUI_API void nui_unlinkaction(NUIstate *S, NUIaction *a);
+NUI_API void nui_unlinkaction(NUIaction *a);
 
 NUI_API NUIaction *nui_nextaction(NUIaction *a, NUIaction *curr);
 
-NUI_API void nui_emit(NUIstate *S, NUIaction *a, NUIvalue *args);
+NUI_API void nui_emitaction(NUIaction *a, int nargs);
 
-NUI_API void nui_starttimer(NUIstate *S, NUIaction *a, NUIvalue *args);
-NUI_API void nui_canceltimer(NUIstate *S, NUIaction *a);
+NUI_API void nui_starttimer(NUIaction *a, unsigned delayed, unsigned interval);
+NUI_API void nui_stoptimer(NUIaction *a);
 
 
 /* node */
-NUI_API NUInode *nui_node(NUIstate *S, NUIstring *class_name, NUIvalue *args);
+NUI_API NUInode *nui_node(NUIstate *S, NUIstring *class_name);
 NUI_API void nui_dropnode(NUInode *n);
 
 NUI_API NUIstring *nui_classname(NUInode *n);
@@ -149,6 +159,7 @@ NUI_API void nui_detach(NUInode *n);
 
 
 /* node attributes */
+NUI_API NUInode *nui_nodefrompos(NUInode *n, NUIpoint pos);
 NUI_API NUIpoint nui_abspos(NUInode *n);
 NUI_API NUIpoint nui_position(NUInode *n);
 NUI_API NUIsize  nui_size(NUInode *n);
@@ -156,17 +167,17 @@ NUI_API NUIsize  nui_naturalsize(NUInode *n);
 
 NUI_API void nui_move(NUInode *n, NUIpoint pos);
 NUI_API void nui_resize(NUInode *n, NUIsize size);
-NUI_API void nui_show(NUInode *n);
-NUI_API void nui_hide(NUInode *n);
+NUI_API int  nui_show(NUInode *n);
+NUI_API int  nui_hide(NUInode *n);
+NUI_API int  nui_isvisible(NUInode *n);
 
 NUI_API void *nui_gethandle(NUInode *n);
 
 NUI_API int nui_getattr(NUInode *n, NUIstring *key, NUIvalue *pv);
 NUI_API int nui_setattr(NUInode *n, NUIstring *key, NUIvalue v);
-NUI_API int nui_delattr(NUInode *n, NUIstring *key);
 
-NUI_API void nui_setid(NUInode *n, int id);
-NUI_API int  nui_getid(NUInode *n);
+NUI_API void nui_setid(NUInode *n, NUIstring *id);
+NUI_API NUIstring *nui_getid(NUInode *n);
 
 NUI_API NUIaction *nui_getaction(NUInode *n);
 NUI_API void       nui_setaction(NUInode *n, NUIaction *a);
