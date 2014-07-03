@@ -212,6 +212,7 @@ struct NUInode {
     NUInode *prev_sibling; /* previous sibling of this node */
     NUInode *next_sibling; /* next sibling of this node */
     NUInode *children; /* first child of this node */
+    size_t childcount;
 
     /* natual attributes */
     NUIclass *klass;
@@ -1076,6 +1077,7 @@ NUInode *nui_node(NUIstate *S, NUIstring *classname) {
     n->parent = NULL;
     nuiL_init(n);
     n->children = NULL;
+    n->childcount = 0;
 
     n->klass = klass;
     nui_inittable(S, &n->attrs, 0);
@@ -1113,6 +1115,7 @@ void nui_dropnode(NUInode *n) {
 
 void nui_setchildren(NUInode *n, NUInode *newnode) {
     NUInode *i;
+    size_t childcount = 0;
     n = todata(n);
     newnode = todata(newnode);
     if (n->children != NULL) {
@@ -1121,13 +1124,19 @@ void nui_setchildren(NUInode *n, NUInode *newnode) {
             node_setparent(i, NULL);
     }
     if (newnode != NULL) {
+        childcount = 1;
         node_setparent(newnode, n);
-        nuiL_foreach (i, newnode)
+        nuiL_foreach (i, newnode) {
             node_setparent(i, n);
-        if (newnode->parent)
+            ++childcount;
+        }
+        if (newnode->parent) {
             newnode->parent->children = NULL;
+            newnode->parent->childcount = 0;
+        }
     }
     n->children = newnode;
+    n->childcount = childcount;
 }
 
 void nui_append(NUInode *n, NUInode *newnode) {
@@ -1136,6 +1145,8 @@ void nui_append(NUInode *n, NUInode *newnode) {
     node_setparent(newnode, n->parent);
     nuiL_remove(newnode);
     nuiL_append(n, newnode);
+    if (n->parent)
+        ++n->parent->childcount;
 }
 
 void nui_insert(NUInode *n, NUInode *newnode) {
@@ -1146,6 +1157,8 @@ void nui_insert(NUInode *n, NUInode *newnode) {
     nuiL_insert(n, newnode);
     if (n->parent && n->parent->children == n)
         n->parent->children = newnode;
+    if (n->parent)
+        ++n->parent->childcount;
 }
 
 void nui_detach(NUInode *n) {
@@ -1154,8 +1167,11 @@ void nui_detach(NUInode *n) {
     node_setparent(n, NULL);
     next = nuiL_empty(n) ? NULL : nuiL_next(n);
     nuiL_remove_safe(n);
-    if (n->parent && n->parent->children == n)
-        n->parent->children = next;
+    if (n->parent) {
+        if (n->parent->children == n)
+            n->parent->children = next;
+        --n->parent->childcount;
+    }
 }
 
 NUInode* nui_parent(NUInode *n) {
@@ -1177,6 +1193,7 @@ void nui_setparent(NUInode *n, NUInode *parent) {
         nuiL_init(n);
         parent->children = n;
     }
+    ++parent->childcount;
 }
 
 NUInode* nui_firstchild(NUInode *n) {
@@ -1248,6 +1265,8 @@ NUInode* nui_nextleaf(NUInode *n) {
 }
 
 size_t nui_childcount(NUInode *n) {
+    return todata(n)->childcount;
+#if 0
     size_t count = 1;
     NUInode *i;
     n = todata(n);
@@ -1256,12 +1275,15 @@ size_t nui_childcount(NUInode *n) {
     nuiL_foreach(i, n->children)
         ++count;
     return count;
+#endif
 }
 
 NUInode *nui_index(NUInode *n, int idx) {
     NUInode *i;
     n = todata(n);
-    if (n->children == NULL)
+    if (n->children == NULL
+            || (idx >= 0 &&  idx > n->childcount)
+            || (idx <  0 && -idx > n->childcount ))
         return NULL;
     if (idx >= 0) {
         if (idx == 0)
