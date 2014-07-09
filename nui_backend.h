@@ -49,6 +49,7 @@ struct NUItable {
 
 struct NUIattr {
     size_t size;
+    NUIvalue value;
     void (*deletor) (NUIattr *attr);
     int (*getattr) (NUIattr *attr, NUInode *n, NUIstring *key, NUIvalue *v);
     int (*setattr) (NUIattr *attr, NUInode *n, NUIstring *key, NUIvalue *v);

@@ -51,7 +51,6 @@ typedef enum NUItype {
 #define X(name, type, var) NUI_T##name,
     NUI_VALUE_TYPES(X)
 #undef  X
-    NUI_TARGSEND,
     NUI_TYPE_COUNT
 } NUItype;
 
@@ -162,7 +161,7 @@ NUI_API void nui_detach(NUInode *n);
 NUI_API NUInode *nui_nodefrompos(NUInode *n, NUIpoint pos);
 NUI_API NUIpoint nui_abspos(NUInode *n);
 NUI_API NUIpoint nui_position(NUInode *n);
-NUI_API NUIsize  nui_size(NUInode *n);
+NUI_API NUIsize  nui_usersize(NUInode *n);
 NUI_API NUIsize  nui_naturalsize(NUInode *n);
 
 NUI_API void nui_move(NUInode *n, NUIpoint pos);
@@ -171,16 +170,16 @@ NUI_API int  nui_show(NUInode *n);
 NUI_API int  nui_hide(NUInode *n);
 NUI_API int  nui_isvisible(NUInode *n);
 
-NUI_API void *nui_gethandle(NUInode *n);
+NUI_API void *nui_nativehandle(NUInode *n);
 
 NUI_API int nui_getattr(NUInode *n, NUIstring *key, NUIvalue *pv);
 NUI_API int nui_setattr(NUInode *n, NUIstring *key, NUIvalue v);
 
-NUI_API void nui_setid(NUInode *n, NUIstring *id);
-NUI_API NUIstring *nui_getid(NUInode *n);
+NUI_API void nui_setnodeid(NUInode *n, NUIstring *id);
+NUI_API NUIstring *nui_getnodeid(NUInode *n);
 
-NUI_API NUIaction *nui_getaction(NUInode *n);
-NUI_API void       nui_setaction(NUInode *n, NUIaction *a);
+NUI_API NUIaction *nui_getnodeaction(NUInode *n);
+NUI_API void       nui_setnodeaction(NUInode *n, NUIaction *a);
 
 
 /* value helpers */
@@ -192,15 +191,23 @@ NUI_API void       nui_setaction(NUInode *n, NUIaction *a);
 # endif
 #endif /* NUI_INLINE */
 
+NUI_INLINE NUIpoint nui_point(int x, int y) {
+    NUIpoint pt;
+    pt.x = x;
+    pt.y = y;
+    return pt;
+}
+
+NUI_INLINE NUIsize nui_size(int width, int height) {
+    NUIsize sz;
+    sz.width  = width;
+    sz.height = height;
+    return sz;
+}
+
 NUI_INLINE NUIvalue nui_nilvalue(void) {
     NUIvalue v;
     v.type = NUI_TNIL;
-    return v;
-}
-
-NUI_INLINE NUIvalue nui_argsend(void) {
-    NUIvalue v;
-    v.type = NUI_TARGSEND;
     return v;
 }
 
