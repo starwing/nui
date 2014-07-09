@@ -1027,7 +1027,6 @@ static void node_delete(NUIstate *S, NUInode *n) {
     if (n->klass->delete_node)
         n->klass->delete_node(n->klass, touser(n));
     nui_freetable(n->klass->S, &n->attrs);
-    printf("delete node: %p\n", n);
     nuiM_freemem(S, n, totalsize);
 }
 
@@ -1039,7 +1038,6 @@ NUInode *nui_node(NUIstate *S, NUIstring *classname) {
     size_t totalsize = sizeof(NUInode) + klass->node_size;
 
     n = (NUInode*)nuiM_malloc(S, totalsize);
-    printf("new node: %p (%d)\n", n, totalsize);
     if (n == NULL) return NULL;
     n->next = klass->all_nodes;
     klass->all_nodes = n;
