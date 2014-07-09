@@ -334,6 +334,7 @@ static void *nuiM_realloc_ (NUIstate *S, void *block, size_t oldsize,
  */
 #define todata(b) nui_checkexp(b != NULL, (b)-1)
 #define touser(b) nui_checkexp(b != NULL, (b)+1)
+#define todata_safe(b) ((b) == NULL ? NULL : (b)-1)
 #define touser_safe(b) ((b) == NULL ? NULL : (b)+1)
 
 /* === nui string === */
@@ -1183,17 +1184,21 @@ NUInode* nui_lastchild(NUInode *n) {
 
 NUInode* nui_prevsibling(NUInode *n) {
     n = todata(n);
+#if 0
     if ((n->parent != NULL && n == n->parent->children)
             || nuiL_empty(n))
         return NULL;
+#endif
     return touser(nuiL_prev(n));
 }
 
 NUInode* nui_nextsibling(NUInode *n) {
     n = todata(n);
+#if 0
     if ((n->parent != NULL && n == nuiL_prev(n->parent->children))
             || nuiL_empty(n))
         return NULL;
+#endif
     return touser(nuiL_next(n));
 }
 
@@ -1217,29 +1222,74 @@ NUInode* nui_lastleaf(NUInode *root) {
     return touser(root);
 }
 
-NUInode* nui_prevleaf(NUInode *n) {
+NUInode* nui_prevleaf(NUInode *n, NUInode *root) {
     NUInode *parent, *firstchild;
+    if (n == root) return NULL; /* firstleaf */
     n = todata(n);
+    /* return parent if n is the first child of parent. */
     if ((parent = n->parent) != NULL
-            && parent->children == n) /* first child */
-        return parent;
+            && parent->children == n)
+        return touser(parent);
     if (nuiL_empty(n))
-        return NULL;
+        return nui_lastleaf(touser(n)); /* return NULL; */
+    /* set n to the preious sibling */
     n = nuiL_prev(n);
+    /* and get it's last leaf */
     while ((firstchild = n->children) != NULL)
         n = nuiL_prev(firstchild);
     return touser(n);
 }
 
-NUInode* nui_nextleaf(NUInode *n) {
+NUInode* nui_nextleaf(NUInode *n, NUInode *root) {
     NUInode *parent;
     n = todata(n);
+    root = todata_safe(root);
+    /* if n has children, return the first one */
     if (n->children)
-        return n->children;
-    while ((parent = n->parent) != NULL
+        return touser(n->children);
+    /* otherwise, get the first parent that not the last child */
+    while (n != root
+            && (parent = n->parent) != NULL
             && parent->children == nuiL_next(n))
         n = parent;
-    return nuiL_empty(n) ? NULL : touser(nuiL_next(n));
+    if (n == root/* || nuiL_empty(n)*/) /* lastleaf */
+        return NULL;
+    if (nuiL_empty(n)) return touser(n);
+    /* return the next sibling of that node */
+    return touser(nuiL_next(n));
+}
+
+NUInode *nui_leafprev(NUInode *n, NUInode *curr) {
+    NUInode *parent, *firstchild;
+    if (curr == NULL) return nui_lastleaf(n); /* lastleaf */
+    if (curr == n) return NULL; /* firstleaf */
+    n = todata(n);
+    curr = todata(curr);
+    if ((parent = curr->parent) != NULL
+            && parent->children == curr)
+        return touser(parent);
+    nui_assert(!nuiL_empty(curr)); /* curr mustn't empty */
+    curr = nuiL_prev(curr);
+    while ((firstchild = curr->children) != NULL)
+        curr = nuiL_prev(firstchild);
+    return touser(curr);
+}
+
+NUInode *nui_leafnext(NUInode *n, NUInode *curr) {
+    NUInode *parent;
+    if (curr == NULL) return n; /* firstleaf */
+    n = todata(n);
+    curr = todata(curr);
+    if (curr->children != NULL)
+        return touser(curr->children);
+    while (curr != n
+            && (parent = curr->parent) != NULL
+            && parent->children == nuiL_next(curr))
+        curr = parent;
+    if (curr == n) /* lastleaf */
+        return NULL;
+    nui_assert(!nuiL_empty(curr));
+    return touser(nuiL_next(curr));
 }
 
 size_t nui_childcount(NUInode *n) {
@@ -1321,19 +1371,15 @@ NUIaction *nui_getnodeaction(NUInode *n)
 { return todata(n)->action; }
 
 NUInode *nui_nodefrompos(NUInode *n, NUIpoint pos) {
-    NUInode *parent;
     NUInode *i;
-    n = todata(n);
-    parent = n->parent;
-    n->parent = NULL; /* nui_nextleaf will check whole tree. */
-    for (i = n; i != NULL; i = nui_nextleaf(touser(i))) {
-        if (i->pos.x >= pos.x && i->pos.y >= pos.y
-                && i->pos.x+i->size.width < pos.x
-                && i->pos.y+i->size.height < pos.y)
+    for (i = n; i != NULL; i = nui_nextleaf(i, n)) {
+        NUInode *curr = todata(i);
+        if (curr->pos.x >= pos.x && curr->pos.y >= pos.y
+                && curr->pos.x+curr->size.width < pos.x
+                && curr->pos.y+curr->size.height < pos.y)
             break;
     }
-    n->parent = parent;
-    return i == NULL ? NULL : touser(i);
+    return i;
 }
 
 NUIpoint nui_abspos(NUInode *n) {

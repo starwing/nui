@@ -142,8 +142,8 @@ NUI_API NUInode *nui_nextsibling(NUInode *n);
 NUI_API NUInode *nui_root(NUInode *n);
 NUI_API NUInode *nui_firstleaf(NUInode *n);
 NUI_API NUInode *nui_lastleaf(NUInode *n);
-NUI_API NUInode *nui_prevleaf(NUInode *n);
-NUI_API NUInode *nui_nextleaf(NUInode *n);
+NUI_API NUInode *nui_prevleaf(NUInode *n, NUInode *root);
+NUI_API NUInode *nui_nextleaf(NUInode *n, NUInode *root);
 
 NUI_API NUInode *nui_index(NUInode *n, int idx);
 NUI_API size_t   nui_childcount(NUInode *n);
