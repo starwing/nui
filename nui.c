@@ -103,20 +103,14 @@ typedef enum NUIpredefidx {
 #define nuiL_prev(q)     ((q)->NUI_PREV)
 
 #define nuiL_insert(h, x) ((void)(                                            \
-    (x)->NUI_NEXT = (h)->NUI_NEXT,                                            \
-    (x)->NUI_NEXT->NUI_PREV = (x),                                            \
-    (x)->NUI_PREV = (h),                                                      \
-    (h)->NUI_NEXT = (x)))
-
-#define nuiL_insert_pointer(p, x) ((void)(                                    \
-    (p) != NULL ? nuiL_insert(p, x) :                                         \
-    ( (p) = (x), nuiL_init(x) )))
-
-#define nuiL_append(h, x) ((void)(                                            \
     (x)->NUI_PREV = (h)->NUI_PREV,                                            \
     (x)->NUI_PREV->NUI_NEXT = (x),                                            \
     (x)->NUI_NEXT = (h),                                                      \
     (h)->NUI_PREV = (x)))
+
+#define nuiL_insert_pointer(p, x) ((void)(                                    \
+    (p) != NULL ? nuiL_insert(p, x) :                                         \
+    ( (p) = (x), nuiL_init(x) )))
 
 #define nuiL_remove(x) ((void)(                                               \
     (x)->NUI_NEXT->NUI_PREV = (x)->NUI_PREV,                                  \
@@ -1029,8 +1023,7 @@ static void node_setparent(NUInode *n, NUInode *parent) {
 
 static void node_delete(NUIstate *S, NUInode *n) {
     size_t totalsize = sizeof(NUInode) + n->klass->node_size;
-    node_setparent(n, NULL);
-    nuiL_remove_safe(n);
+    nui_detach(touser(n));
     if (n->klass->delete_node)
         n->klass->delete_node(n->klass, touser(n));
     nui_freetable(n->klass->S, &n->attrs);
@@ -1114,11 +1107,14 @@ void nui_setchildren(NUInode *n, NUInode *newnode) {
 }
 
 void nui_append(NUInode *n, NUInode *newnode) {
+    NUInode *next;
     n = todata(n);
     newnode = todata(newnode);
+    if (newnode->parent != NULL)
+        nui_detach(touser(newnode));
     node_setparent(newnode, n->parent);
-    nuiL_remove(newnode);
-    nuiL_append(n, newnode);
+    next = nuiL_next(n);
+    nuiL_insert(next, newnode);
     if (n->parent)
         ++n->parent->childcount;
 }
@@ -1126,8 +1122,9 @@ void nui_append(NUInode *n, NUInode *newnode) {
 void nui_insert(NUInode *n, NUInode *newnode) {
     n = todata(n);
     newnode = todata(newnode);
+    if (newnode->parent != NULL)
+        nui_detach(touser(newnode));
     node_setparent(newnode, n->parent);
-    nuiL_remove(newnode);
     nuiL_insert(n, newnode);
     if (n->parent && n->parent->children == n)
         n->parent->children = newnode;
@@ -1136,15 +1133,16 @@ void nui_insert(NUInode *n, NUInode *newnode) {
 }
 
 void nui_detach(NUInode *n) {
-    NUInode *next;
+    NUInode *next, *parent;
     n = todata(n);
+    parent = n->parent;
     node_setparent(n, NULL);
     next = nuiL_empty(n) ? NULL : nuiL_next(n);
     nuiL_remove_safe(n);
-    if (n->parent) {
-        if (n->parent->children == n)
-            n->parent->children = next;
-        --n->parent->childcount;
+    if (parent) {
+        if (parent->children == n)
+            parent->children = next;
+        --parent->childcount;
     }
 }
 
@@ -1157,11 +1155,11 @@ NUInode* nui_parent(NUInode *n) {
 }
 
 void nui_setparent(NUInode *n, NUInode *parent) {
-    if (parent == NULL) return nui_detach(n);
     n = todata(n);
-    parent = todata(parent);
+    parent = todata_safe(parent);
+    if (n->parent != NULL) nui_detach(n);
+    if (parent == NULL) return;
     node_setparent(n, parent);
-    nuiL_remove(n);
     if (parent->children)
         nuiL_insert(parent->children, n);
     else {
