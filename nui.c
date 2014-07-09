@@ -1180,23 +1180,21 @@ NUInode* nui_lastchild(NUInode *n) {
     return touser(nuiL_prev(n->children));
 }
 
-NUInode* nui_prevsibling(NUInode *n) {
+NUInode* nui_prevsibling(NUInode *n, int loop) {
     n = todata(n);
-#if 0
+    if (loop) return touser(nuiL_prev(n));
     if ((n->parent != NULL && n == n->parent->children)
             || nuiL_empty(n))
         return NULL;
-#endif
     return touser(nuiL_prev(n));
 }
 
-NUInode* nui_nextsibling(NUInode *n) {
+NUInode* nui_nextsibling(NUInode *n, int loop) {
     n = todata(n);
-#if 0
-    if ((n->parent != NULL && n == nuiL_prev(n->parent->children))
-            || nuiL_empty(n))
+    if (loop) return touser(nuiL_next(n));
+    if (((n->parent != NULL && n == nuiL_prev(n->parent->children))
+            || nuiL_empty(n)))
         return NULL;
-#endif
     return touser(nuiL_next(n));
 }
 

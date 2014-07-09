@@ -136,8 +136,8 @@ NUI_API int nui_unmapnode (NUInode *n);
 NUI_API NUInode *nui_parent(NUInode *n);
 NUI_API NUInode *nui_firstchild(NUInode *n);
 NUI_API NUInode *nui_lastchild(NUInode *n);
-NUI_API NUInode *nui_prevsibling(NUInode *n);
-NUI_API NUInode *nui_nextsibling(NUInode *n);
+NUI_API NUInode *nui_prevsibling(NUInode *n, int loop);
+NUI_API NUInode *nui_nextsibling(NUInode *n, int loop);
 
 NUI_API NUInode *nui_root(NUInode *n);
 NUI_API NUInode *nui_firstleaf(NUInode *n);
