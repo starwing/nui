@@ -1566,13 +1566,6 @@ static void class_deletor(NUIstate *S, void *p) {
     nuiM_freemem(S, c, c->class_size);
 }
 
-static void attrib_deletor(NUIstate *S, void *p) {
-    NUIattr *attr = (NUIattr*)p;
-    if (attr->deletor)
-        attr->deletor(attr);
-    nuiM_freemem(S, p, attr->size);
-}
-
 NUIclass *nui_newclass(NUIstate *S, NUIstring *classname, size_t sz) {
     NUIentry *entry;
     NUIclass *klass;
@@ -1615,6 +1608,22 @@ NUIclass *nui_newclass(NUIstate *S, NUIstring *classname, size_t sz) {
     return klass;
 }
 
+static void attrib_deletor(NUIstate *S, void *p) {
+    NUIattr *attr = (NUIattr*)p;
+    if (attr->deletor)
+        attr->deletor(S, attr);
+    nuiM_freemem(S, p, attr->size);
+}
+
+static void default_attrdeletor(NUIstate *S, NUIattr *attr) {
+    switch (attr->value.type) {
+    case NUI_TACTION: nui_dropaction(attr->value.action); return;
+    case NUI_TSTRING: nui_dropstring(S, attr->value.string); return;
+    case NUI_TNODE:   nui_dropnode(attr->value.node); return;
+    default: return;
+    }
+}
+
 static int default_getattr(NUIattr *attr, NUInode *n, NUIstring *key, NUIvalue *v) {
     *v = attr->value;
     return 1;
@@ -1639,7 +1648,7 @@ NUIattr *nui_newattr(NUIclass *klass, NUIstring *key, size_t sz) {
     entry->deletor = attrib_deletor;
     entry->value = attr;
     attr->size = sz;
-    attr->deletor = NULL;
+    attr->deletor = default_attrdeletor;
     attr->getattr = default_getattr;
     attr->setattr = default_setattr;
     return attr;
