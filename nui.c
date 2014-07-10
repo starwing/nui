@@ -357,9 +357,8 @@ static void deletestring(NUIstate *S, NUIstring *s) {
 }
 
 static void nuiS_resize(NUIstate *S, size_t newsize) {
-    int i;
     NUIstringtable *tb = &S->strt;
-    size_t realsize = NUI_MIN_STRTABLE_SIZE;
+    size_t i, realsize = NUI_MIN_STRTABLE_SIZE;
     while (realsize < NUI_MAX_SIZET/2 && realsize < newsize)
         realsize *= 2;
     if (realsize > tb->size) {
@@ -479,7 +478,7 @@ static void nuiS_open(NUIstate *S) {
 }
 
 static void nuiS_close(NUIstate *S) {
-    int i;
+    size_t i;
     NUIstringtable *tb = &S->strt;
     for (i = 0; i < tb->size; ++i) {
         NUIstring *s = tb->hash[i];
@@ -567,7 +566,8 @@ void nui_inittable(NUIstate *S, NUItable *t, size_t size) {
         return;
     }
 
-    while ((1<<lsize) < NUI_MAX_SIZET/2 && (1<<lsize) < size)
+    while ((size_t)(1<<lsize) < NUI_MAX_SIZET/2
+	    && (size_t)(1<<lsize) < size)
         ++lsize;
     if ((1<<lsize) >= NUI_MAX_SIZET/2)
         nuiM_toobig(S);
@@ -701,7 +701,7 @@ static int stack_resize(NUIstate *S, size_t size) {
 
 static size_t stack_newframe(NUIstate *S, int nargs) {
     size_t curr_base = S->stack_base;
-    if (S->stack_top - S->stack_base < nargs)
+    if (S->stack_top - S->stack_base < (size_t)nargs)
         nargs = S->stack_top - S->stack_base;
     S->stack_base = S->stack_top - nargs;
     S->stack_top  = S->stack_base + nargs;
@@ -710,7 +710,7 @@ static size_t stack_newframe(NUIstate *S, int nargs) {
 }
 
 static int stack_popframe(NUIstate *S, size_t base, int nrets) {
-    if (nrets < S->stack_top-S->stack_base)
+    if ((size_t)nrets < S->stack_top-S->stack_base)
         nui_settop(S, nrets);
     if (S->stack_top - nrets > S->stack_base) {
         int i;
@@ -1068,8 +1068,9 @@ NUInode *nui_node(NUIstate *S, NUIstring *classname) {
 void nui_dropnode(NUInode *n) {
     NUInode **list;
     n = todata(n);
-    list = &n->klass->all_nodes;
-    for (; *list != NULL && *list != n; list = &(*list)->next)
+    for (list = &n->klass->all_nodes;
+            *list != NULL && *list != n;
+            list = &(*list)->next)
         ;
     if (*list == n) {
         *list = n->next;
@@ -1304,8 +1305,8 @@ NUInode *nui_index(NUInode *n, int idx) {
     NUInode *i;
     n = todata(n);
     if (n->children == NULL
-            || (idx >= 0 &&  idx > n->childcount)
-            || (idx <  0 && -idx > n->childcount ))
+            || (idx >= 0 &&  (size_t)idx > n->childcount)
+            || (idx <  0 && (size_t)-idx > n->childcount ))
         return NULL;
     if (idx >= 0) {
         if (idx == 0)
@@ -1465,9 +1466,9 @@ static int call_getattr(NUIstate *S, NUInode *n, NUItable *t, NUIstring *key, NU
 }
 
 int nui_getattr(NUInode *n, NUIstring *key, NUIvalue *pv) {
-    NUIstate *S = n->klass->S;
-    NUIclass *klass = n->klass;
-    NUIclass *defklass = klass->S->default_class;
+    NUIclass *klass = todata(n)->klass;
+    NUIstate *S = klass->S;
+    NUIclass *defklass = S->default_class;
     int nrets = 0;
     n = todata(n);
     if ((nrets = call_getattr(S, n, &n->attrs, key, pv)) != 0)
@@ -1496,9 +1497,9 @@ static int call_setattr(NUIstate *S, NUInode *n, NUItable *t, NUIstring *key, NU
 }
 
 int nui_setattr(NUInode *n, NUIstring *key, NUIvalue v) {
-    NUIstate *S = n->klass->S;
-    NUIclass *klass = n->klass;
-    NUIclass *defklass = klass->S->default_class;
+    NUIclass *klass = todata(n)->klass;
+    NUIstate *S = klass->S;
+    NUIclass *defklass = S->default_class;
     int nrets = 0;
     n = todata(n);
     if ((nrets = call_setattr(S, n, &n->attrs, key, &v)) != 0)
@@ -1608,7 +1609,7 @@ NUIclass *nui_newclass(NUIstate *S, NUIstring *classname, size_t sz) {
     return klass;
 }
 
-static void attrib_deletor(NUIstate *S, void *p) {
+static void attr_deletor(NUIstate *S, void *p) {
     NUIattr *attr = (NUIattr*)p;
     if (attr->deletor)
         attr->deletor(S, attr);
@@ -1645,7 +1646,7 @@ NUIattr *nui_newattr(NUIclass *klass, NUIstring *key, size_t sz) {
     nui_assert(sz >= sizeof(NUIattr));
     attr = nuiM_malloc(klass->S, sz);
     entry = nui_settable(klass->S, &klass->attrs, key);
-    entry->deletor = attrib_deletor;
+    entry->deletor = attr_deletor;
     entry->value = attr;
     attr->size = sz;
     attr->deletor = default_attrdeletor;
@@ -1792,5 +1793,6 @@ int nui_loop(NUIstate *S) {
 }
 
 
-/* cc: flags+='-s -O3 -shared -DNUI_DLL -Wl,--output-def,nui.def'
- * cc: output='nui.dll' run='nui_test' */
+/* cc: flags+='-g -shared -DLUA_BUILD_AS_DLL -DNUI_DLL'
+ * cc: libs+='-llua52.dll' run='lua test.lua'
+ * cc: input+='nui_lua.c lbind.c' output="nui.dll" */

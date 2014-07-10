@@ -184,10 +184,12 @@ NUI_API void       nui_setnodeaction(NUInode *n, NUIaction *a);
 
 /* value helpers */
 #ifndef NUI_INLINE
-# ifdef NUI_STATIC_INLINE
-#  define NUI_INLINE static 
-# else
+# if defined(__GNUC__)
 #  define NUI_INLINE inline static
+# elif defined(__MSC_VER)
+#  define NUI_INLINE __inline static
+# else
+#  define NUI_INLINE static 
 # endif
 #endif /* NUI_INLINE */
 
