@@ -1010,13 +1010,14 @@ void nuiA_updateactions(NUIstate *S) {
 
 static void node_setparent(NUInode *n, NUInode *parent) {
     if (n->parent && n->parent != parent) {
-        if (n->klass->child_removed)
-            n->klass->child_removed(n->klass, touser(n->parent), touser(n));
+        NUInode *p = n->parent;
+        if (p->klass->child_removed)
+            p->klass->child_removed(p->klass, touser(p), touser(n));
         n->parent = NULL;
     }
     if (parent) {
-        if (n->klass->child_added)
-            n->klass->child_added(n->klass, touser(parent), touser(n));
+        if (parent->klass->child_added)
+            parent->klass->child_added(parent->klass, touser(parent), touser(n));
         n->parent = parent;
     }
 }
