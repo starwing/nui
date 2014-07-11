@@ -210,6 +210,7 @@ NUI_INLINE NUIsize nui_size(int width, int height) {
 NUI_INLINE NUIvalue nui_nilvalue(void) {
     NUIvalue v;
     v.type = NUI_TNIL;
+    v.pointer = NULL;
     return v;
 }
 

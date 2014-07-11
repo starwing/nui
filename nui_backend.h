@@ -96,21 +96,31 @@ struct NUIclass {
     int (*layout_naturalsize) (NUIclass *c, NUInode *n, NUIsize *psz);
 };
 
+
 NUI_API n_noret nui_error(NUIstate *S, const char *fmt, ...);
 
-NUI_API NUIstate  *nui_newstate(NUIparams *params);
-NUI_API NUIclass  *nui_newclass(NUIstate *S, NUIstring *class_name, size_t sz);
-NUI_API NUIaction *nui_newnamedaction(NUIstate *S, NUIstring *name, NUIactionf *f, size_t sz);
 
+NUI_API NUIstate  *nui_newstate(NUIparams *params);
 NUI_API NUIparams *nui_stateparams(NUIstate *S);
 
-NUI_API NUIattr *nui_newattr(NUIclass *c, NUIstring *key, size_t sz);
-NUI_API NUIattr *nui_newnodeattr(NUInode *n, NUIstring *key, size_t sz);
 
-NUI_API void nui_delattr(NUIclass *c, NUIstring *key);
-NUI_API void nui_delnodeattr(NUInode *n, NUIstring *key);
-
+NUI_API NUIclass *nui_class(NUIstate *S, NUIstring *classname);
+NUI_API NUIclass *nui_newclass(NUIstate *S, NUIstring *classname, size_t sz);
 NUI_API NUIclass *nui_nodeclass(NUInode *n);
+NUI_API void nui_dropclass(NUIstate *S, NUIstring *classname);
+
+
+NUI_API NUIattr *nui_attr(NUIclass *c, NUIstring *key);
+NUI_API NUIattr *nui_newattr(NUIclass *c, NUIstring *key, size_t sz);
+NUI_API void nui_dropattr(NUIclass *c, NUIstring *key);
+
+NUI_API NUIattr *nui_nodeattr(NUInode *n, NUIstring *key);
+NUI_API NUIattr *nui_newnodeattr(NUInode *n, NUIstring *key, size_t sz);
+NUI_API void nui_dropodeattr(NUInode *n, NUIstring *key);
+
+
+NUI_API NUIaction *nui_newnamedaction(NUIstate *S, NUIstring *name, NUIactionf *f, size_t sz);
+NUI_API void nui_dropnamedaction(NUIstate *S, NUIstring *name);
 
 NUI_API void nui_setactiondeletor(NUIaction *a, NUIdeletor *f);
 NUI_API NUIdeletor *nui_getactiondeletor(NUIaction *a);
@@ -125,7 +135,7 @@ NUI_API void nui_resizetable(NUIstate *S, NUItable *t, size_t size);
 
 NUI_API NUIentry *nui_gettable(NUItable *t, NUIstring *key);
 NUI_API NUIentry *nui_settable(NUIstate *S, NUItable *t, NUIstring *key);
-NUI_API void      nui_deltable(NUIstate *S, NUIentry *e);
+NUI_API void      nui_dropentry(NUIstate *S, NUIentry *e);
 
 NUI_API size_t    nui_counttable(NUItable *t);
 NUI_API NUIentry *nui_nextentry(NUItable *t, NUIentry *curr);
