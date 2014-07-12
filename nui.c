@@ -324,7 +324,7 @@ static void *nuiM_realloc_ (NUIstate *S, void *block, size_t oldsize,
  * NUIstring needn't call that. as it's use NUI APIs to operate
  * NUIstring, but not access the data directly.
  */
-#define offset_of(f,t)      ((ptrdiff_t)(&((t*)(void*)0)->f))
+#define offset_of(f,t)      ((ptrdiff_t) &((t*)0)->f)
 #define container_of(p,f,t) ((t*)((char*)(p)-offset_of(f,t)))
 
 #define string_touser(d) nui_checkexp(d != NULL, (d)+1)
@@ -890,13 +890,16 @@ void nui_unlinkaction(NUIaction *a) {
     nuiL_remove_safe(action_todata(a));
 }
 
+NUIaction *nui_prevaction(NUIaction *a, NUIaction *curr) {
+    if (curr == a) return NULL;
+    if (curr == NULL) curr = a;
+    return action_touser(nuiL_prev(action_todata(curr)));
+}
+
 NUIaction *nui_nextaction(NUIaction *a, NUIaction *curr) {
-    NUIactiondata *D = action_todata(a), *Dcurr;
     if (curr == NULL) return a;
-    Dcurr = action_todata(curr);
-    if (nuiL_next(Dcurr) == D)
-        return NULL;
-    return action_touser(nuiL_next(Dcurr));
+    curr = action_touser(nuiL_next(action_todata(curr)));
+    return curr == a ? NULL : curr;
 }
 
 void nui_emitaction(NUIaction *a, int nargs) {
@@ -1195,122 +1198,76 @@ void nui_setparent(NUInode *n, NUInode *parent) {
     }
 }
 
-NUInode* nui_firstchild(NUInode *n) {
-    NUInodedata *D = node_todata(n);
-    if (D->children == NULL)
-        return NULL;
-    return node_touser(D->children);
+NUInode *nui_prevchild(NUInode *n, NUInode *curr) {
+    NUInodedata *D;
+    if (n == NULL) return NULL;
+    D = node_todata(n);
+    if (D->children == NULL) return NULL;
+    return nui_prevsibling(node_touser(D->children), curr);
 }
 
-NUInode* nui_lastchild(NUInode *n) {
-    NUInodedata *D = node_todata(n);
-    if (D->children == NULL)
-        return NULL;
-    return node_touser(nuiL_prev(D->children));
+NUInode *nui_nextchild(NUInode *n, NUInode *curr) {
+    NUInodedata *D;
+    if (n == NULL) return NULL;
+    D = node_todata(n);
+    if (D->children == NULL) return NULL;
+    return nui_nextsibling(node_touser(D->children), curr);
 }
 
-NUInode* nui_prevsibling(NUInode *n, int loop) {
-    NUInodedata *D = node_todata(n);
-    if (!loop && (((D->parent != NULL && D == D->parent->children)
-                    || nuiL_empty(D))))
-        return NULL;
-    return node_touser(nuiL_prev(D));
+NUInode* nui_prevsibling(NUInode *n, NUInode *curr) {
+    if (curr == n) return NULL;
+    if (curr == NULL) curr = n;
+    return node_touser(nuiL_prev(node_todata(curr)));
 }
 
-NUInode* nui_nextsibling(NUInode *n, int loop) {
-    NUInodedata *D = node_todata(n);
-    if (!loop && (((D->parent != NULL && D == nuiL_prev(D->parent->children))
-                    || nuiL_empty(D))))
-        return NULL;
-    return node_touser(nuiL_next(D));
+NUInode* nui_nextsibling(NUInode *n, NUInode *curr) {
+    if (curr == NULL) return n;
+    curr = node_touser(nuiL_next(node_todata(curr)));
+    return curr == n ? NULL : curr;
 }
 
 NUInode* nui_root(NUInode *n) {
-    NUInodedata *D = node_todata(n);
-    NUInodedata *parent;
+    NUInodedata *D, *parent;
+    if (n == NULL) return NULL;
+    D = node_todata(n);
     while ((parent = D->parent) != NULL)
         D = parent;
     return node_touser(D);
 }
 
-NUInode* nui_firstleaf(NUInode *root) {
-    return root;
-}
-
-NUInode* nui_lastleaf(NUInode *root) {
-    NUInodedata *Droot = node_todata(root);
-    NUInodedata *Dfirstchild;
-    while ((Dfirstchild = Droot->children) != NULL)
-        Droot = nuiL_prev(Dfirstchild);
-    return node_touser(Droot);
-}
-
-NUInode* nui_prevleaf(NUInode *n, NUInode *root) {
-    NUInodedata *D = node_todata(n);
-    NUInodedata *parent, *firstchild;
-    if (n == root) return NULL; /* firstleaf */
-    /* return parent if D is the first child of parent. */
-    if ((parent = D->parent) != NULL
-            && parent->children == D)
-        return node_touser(parent);
-    if (nuiL_empty(D))
-        return nui_lastleaf(n); /* return NULL; */
-    /* set D to the preious sibling */
-    D = nuiL_prev(D);
+NUInode* nui_prevleaf(NUInode *n, NUInode *curr) {
+    NUInodedata *D, *parent, *firstchild;
+    if (curr == n) return NULL; /* end of iteration */
+    if (curr == NULL) curr = n; /* first of iteration */
+    D = node_todata(curr);
+    if (curr != n) {
+        /* return parent if D is the first child of parent. */
+        if ((parent = D->parent) != NULL && parent->children == D)
+            return node_touser(parent);
+        /* set D to the preious sibling */
+        D = nuiL_prev(D);
+    }
     /* and get it's last leaf */
     while ((firstchild = D->children) != NULL)
         D = nuiL_prev(firstchild);
     return node_touser(D);
 }
 
-NUInode* nui_nextleaf(NUInode *n, NUInode *root) {
-    NUInodedata *D = node_todata(n);
-    NUInodedata *parent;
+NUInode* nui_nextleaf(NUInode *n, NUInode *curr) {
+    NUInodedata *D, *parent;
+    if (curr == NULL) return n;
     /* if D has children, return the first one */
+    D = node_todata(curr);
     if (D->children != NULL)
         return node_touser(D->children);
     /* otherwise, get the first parent that not the last child */
-    while (node_touser(D) != root
+    while (node_touser(D) != n
             && (parent = D->parent) != NULL
             && parent->children == nuiL_next(D))
         D = parent;
-    if (node_touser(D) == root/* || nuiL_empty(D)*/) /* lastleaf */
-        return NULL;
+    if (node_touser(D) == n) return NULL;
     /* return the next sibling of that node */
     return node_touser(nuiL_next(D));
-}
-
-NUInode *nui_leafprev(NUInode *n, NUInode *curr) {
-    NUInodedata *Dcurr;
-    NUInodedata *parent, *firstchild;
-    if (curr == NULL) return nui_lastleaf(n); /* lastleaf */
-    if (curr == n) return NULL; /* firstleaf */
-    Dcurr = node_todata(curr);
-    if ((parent = Dcurr->parent) != NULL
-            && parent->children == Dcurr)
-        return node_touser(parent);
-    nui_assert(!nuiL_empty(Dcurr)); /* curr mustn't empty */
-    Dcurr = nuiL_prev(Dcurr);
-    while ((firstchild = Dcurr->children) != NULL)
-        Dcurr = nuiL_prev(firstchild);
-    return node_touser(Dcurr);
-}
-
-NUInode *nui_leafnext(NUInode *n, NUInode *curr) {
-    NUInodedata *Dcurr;
-    NUInodedata *parent;
-    if (curr == NULL) return n; /* firstleaf */
-    Dcurr = node_todata(curr);
-    if (Dcurr->children != NULL)
-        return node_touser(Dcurr->children);
-    while (node_touser(Dcurr) != n
-            && (parent = Dcurr->parent) != NULL
-            && parent->children == nuiL_next(Dcurr))
-        Dcurr = parent;
-    if (node_touser(Dcurr) == n) /* lastleaf */
-        return NULL;
-    nui_assert(!nuiL_empty(Dcurr));
-    return node_touser(nuiL_next(Dcurr));
 }
 
 size_t nui_childcount(NUInode *n) {

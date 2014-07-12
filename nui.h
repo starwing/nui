@@ -120,6 +120,7 @@ NUI_API NUIaction *nui_copyaction(NUIaction *a);
 NUI_API void nui_linkaction(NUIaction *a, NUIaction *newa);
 NUI_API void nui_unlinkaction(NUIaction *a);
 
+NUI_API NUIaction *nui_prevaction(NUIaction *a, NUIaction *curr);
 NUI_API NUIaction *nui_nextaction(NUIaction *a, NUIaction *curr);
 
 NUI_API void nui_emitaction(NUIaction *a, int nargs);
@@ -144,16 +145,14 @@ NUI_API int nui_mapnode   (NUInode *n);
 NUI_API int nui_unmapnode (NUInode *n);
 
 NUI_API NUInode *nui_parent(NUInode *n);
-NUI_API NUInode *nui_firstchild(NUInode *n);
-NUI_API NUInode *nui_lastchild(NUInode *n);
-NUI_API NUInode *nui_prevsibling(NUInode *n, int loop);
-NUI_API NUInode *nui_nextsibling(NUInode *n, int loop);
+NUI_API NUInode *nui_prevchild(NUInode *n, NUInode *curr);
+NUI_API NUInode *nui_nextchild(NUInode *n, NUInode *curr);
+NUI_API NUInode *nui_prevsibling(NUInode *n, NUInode *curr);
+NUI_API NUInode *nui_nextsibling(NUInode *n, NUInode *curr);
 
 NUI_API NUInode *nui_root(NUInode *n);
-NUI_API NUInode *nui_firstleaf(NUInode *n);
-NUI_API NUInode *nui_lastleaf(NUInode *n);
-NUI_API NUInode *nui_prevleaf(NUInode *n, NUInode *root);
-NUI_API NUInode *nui_nextleaf(NUInode *n, NUInode *root);
+NUI_API NUInode *nui_prevleaf(NUInode *n, NUInode *curr);
+NUI_API NUInode *nui_nextleaf(NUInode *n, NUInode *curr);
 
 NUI_API NUInode *nui_index(NUInode *n, int idx);
 NUI_API size_t   nui_childcount(NUInode *n);
