@@ -63,7 +63,6 @@ typedef struct NUIvalue {
     };
 } NUIvalue;
 
-typedef void NUIactionf(NUIstate *S, NUIaction *a, NUInode *n);
 
 
 /* destroy */
@@ -100,17 +99,23 @@ NUI_API void nui_breakloop(NUIstate *S);
 
 NUI_API unsigned nui_time(NUIstate *S);
 
-NUI_API NUIaction *nui_action(NUIstate *S, NUIactionf *f, size_t sz);
+
+struct NUIaction {
+    size_t size;
+    NUIstate *S;
+    NUInode *n;
+
+    void (*deletor) (NUIstate *S, NUIaction *a);
+
+    int (*copy) (NUIstate *S, NUIaction *from, NUIaction *to);
+    int (*emit) (NUIstate *S, NUIaction *a, NUInode *n);
+};
+
+NUI_API NUIaction *nui_action(NUIstate *S, size_t sz);
 NUI_API NUIaction *nui_namedaction(NUIstate *S, NUIstring *name);
 NUI_API void nui_dropaction(NUIaction *a);
 
 NUI_API NUIaction *nui_copyaction(NUIaction *a);
-NUI_API size_t nui_actionsize(NUIaction *a);
-
-NUI_API void nui_setactionf(NUIaction *a, NUIactionf *f);
-NUI_API NUIactionf *nui_getactionf(NUIaction *a);
-NUI_API void nui_setactionnode(NUIaction *a, NUInode *n);
-NUI_API NUInode *nui_getactionnode(NUIaction *a);
 
 NUI_API void nui_linkaction(NUIaction *a, NUIaction *newa);
 NUI_API void nui_unlinkaction(NUIaction *a);
@@ -124,6 +129,11 @@ NUI_API void nui_stoptimer(NUIaction *a);
 
 
 /* node */
+struct NUInode {
+    NUIstring *id;
+    NUIaction *action;
+};
+
 NUI_API NUInode *nui_node(NUIstate *S, NUIstring *class_name);
 NUI_API void nui_dropnode(NUInode *n);
 
@@ -174,9 +184,6 @@ NUI_API void *nui_nativehandle(NUInode *n);
 
 NUI_API int nui_getattr(NUInode *n, NUIstring *key, NUIvalue *pv);
 NUI_API int nui_setattr(NUInode *n, NUIstring *key, NUIvalue v);
-
-NUI_API void nui_setnodeid(NUInode *n, NUIstring *id);
-NUI_API NUIstring *nui_getnodeid(NUInode *n);
 
 NUI_API NUIaction *nui_getnodeaction(NUInode *n);
 NUI_API void       nui_setnodeaction(NUInode *n, NUIaction *a);

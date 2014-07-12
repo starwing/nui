@@ -59,7 +59,7 @@ struct NUIclass {
     NUIstate *S;
     NUIstring *name;
     NUIclass *parent;
-    NUInode *all_nodes;
+    struct NUInodedata *all_nodes;
     size_t class_size;
     size_t node_size;
     NUItable attrs;
@@ -119,11 +119,8 @@ NUI_API NUIattr *nui_newnodeattr(NUInode *n, NUIstring *key, size_t sz);
 NUI_API void nui_dropodeattr(NUInode *n, NUIstring *key);
 
 
-NUI_API NUIaction *nui_newnamedaction(NUIstate *S, NUIstring *name, NUIactionf *f, size_t sz);
+NUI_API NUIaction *nui_newnamedaction(NUIstate *S, NUIstring *name, size_t sz);
 NUI_API void nui_dropnamedaction(NUIstate *S, NUIstring *name);
-
-NUI_API void nui_setactiondeletor(NUIaction *a, NUIdeletor *f);
-NUI_API NUIdeletor *nui_getactiondeletor(NUIaction *a);
 
 
 /* === table API === */
