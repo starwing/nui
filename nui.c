@@ -116,7 +116,7 @@ typedef enum NUIpredefidx {
     (x)->NUI_NEXT->NUI_PREV = (x)->NUI_PREV,                                  \
     (x)->NUI_PREV->NUI_NEXT = (x)->NUI_NEXT))
 
-#define nuiL_remove_safe(x) ((void)(                                          \
+#define nuiL_remove_init(x) ((void)(                                          \
     (x)->NUI_NEXT->NUI_PREV = (x)->NUI_PREV,                                  \
     (x)->NUI_PREV->NUI_NEXT = (x)->NUI_NEXT,                                  \
     (x)->NUI_PREV = (x),                                                      \
@@ -705,6 +705,7 @@ static int stack_resize(NUIstate *S, size_t size) {
         S->stack_base = S->stack_size;
     if (S->stack_top > S->stack_size)
         S->stack_top = S->stack_size;
+    /*printf("stack_resize: %p (%d)\n", S->stack, S->stack_size);*/
     return 1;
 }
 
@@ -712,10 +713,11 @@ static size_t stack_newframe(NUIstate *S, int nargs) {
     size_t curr_base = S->stack_base;
     if (S->stack_top - S->stack_base < (size_t)nargs)
         nargs = S->stack_top - S->stack_base;
+    /*printf("stack_newframe(%d):\n", nargs);*/
+    /*printf("  curr_base=%d\n", S->stack_base);*/
+    /*printf("  curr_top=%d\n", S->stack_top);*/
     S->stack_base = S->stack_top - nargs;
     S->stack_top  = S->stack_base + nargs;
-    /*printf("stack_newframe(%d):\n", nargs);*/
-    /*printf("  curr_base=%d\n", curr_base);*/
     /*printf("  new_base=%d\n", S->stack_base);*/
     /*printf("  new_top=%d\n", S->stack_top);*/
     return curr_base;
@@ -731,6 +733,7 @@ static int stack_popframe(NUIstate *S, size_t base, int nrets) {
     }
     /*printf("stack_popframe(%d):\n", nrets);*/
     /*printf("  curr_base=%d\n", S->stack_base);*/
+    /*printf("  curr_top=%d\n", S->stack_top);*/
     S->stack_top = S->stack_base + nrets;
     S->stack_base = base;
     /*printf("  new_base=%d\n", S->stack_base);*/
@@ -751,8 +754,8 @@ void nui_settop(NUIstate *S, int idx) {
             S->stack[S->stack_top++] = nui_nilvalue();
         S->stack_top = newtop;
     }
-    else if (S->stack_top+idx >= S->stack_base)
-        S->stack_top += idx;
+    else if (S->stack_top+idx+1 >= S->stack_base)
+        S->stack_top += idx+1;
 }
 
 int nui_pushvalue(NUIstate *S, NUIvalue v) {
@@ -796,14 +799,16 @@ void nui_rotate(NUIstate *S, int idx, int n) {
     reverse(begin, end);
 }
 
-int nui_copyvalues(NUIstate *S, int idx) {
-    int copyn = idx<0 ? -idx : nui_gettop(S)+idx+1;
-    if (S->stack_top+copyn >= S->stack_size
-            && !stack_resize(S, S->stack_top+copyn))
+int nui_copyvalues(NUIstate *S, int n) {
+    if (S->stack_top+n >= S->stack_size
+            && !stack_resize(S, S->stack_top+n))
         return 0;
+    /*printf("copy(%d): before %d\n", n, S->stack_top);*/
     memcpy(&S->stack[S->stack_top],
-           &S->stack[S->stack_top-copyn],
-           copyn * sizeof(NUIvalue));
+           &S->stack[S->stack_top-n],
+           n * sizeof(NUIvalue));
+    S->stack_top += n;
+    /*printf("copy(%d): after %d\n", n, S->stack_top);*/
     return 1;
 }
 
@@ -882,12 +887,13 @@ void nui_actiondelayed(NUIaction *a, unsigned delayed) {
 void nui_linkaction(NUIaction *a, NUIaction *na) {
     NUIactiondata *D = action_todata(a);
     NUIactiondata *Dnew = action_todata(na);
-    nuiL_remove(D);
+    nuiL_remove(Dnew);
     nuiL_insert(D, Dnew);
 }
 
 void nui_unlinkaction(NUIaction *a) {
-    nuiL_remove_safe(action_todata(a));
+    NUIactiondata *D = action_todata(a);
+    nuiL_remove_init(D);
 }
 
 NUIaction *nui_prevaction(NUIaction *a, NUIaction *curr) {
@@ -902,34 +908,48 @@ NUIaction *nui_nextaction(NUIaction *a, NUIaction *curr) {
     return curr == a ? NULL : curr;
 }
 
-void nui_emitaction(NUIaction *a, int nargs) {
+int nui_emitaction(NUIaction *a, int nargs) {
     NUIactiondata *D = action_todata(a), *Di, *next;
     NUIstate *S = a->S;
     NUInode *n = a->n;
     int res = 0, is_single = nuiL_empty(D);
+    int count = 0;
     size_t base;
 
-    if (!is_single)
-        nui_copyvalues(S, nargs);
+    /*printf("nui_top: %d\n", nui_gettop(S));*/
+    /*printf("emitaction(%d): is_single=%d\n", nargs, is_single);*/
+    /*printf("  S->stack_base = %d\n", S->stack_base);*/
+    /*printf("  S->stack_top = %d\n", S->stack_top);*/
+    /*printf("!!! emit(%p) idx = %d\n", a, count);*/
     if (a->emit != NULL) {
+        if (!is_single)
+            nui_copyvalues(S, nargs);
         base = stack_newframe(S, nargs);
+        ++D->call_count;
         res = a->emit(S, a, n);
+        ++count;
         stack_popframe(S, base, 0);
     }
     if (is_single || res)
-        return;
+        return count;
     nuiL_foreach_safe(Di, next, D) {
         NUIaction *i = action_touser(Di);
+        /*printf("!!! emit(%p) idx = %d\n", i, count);*/
         if (i->emit != NULL) {
             nui_copyvalues(S, nargs);
             base = stack_newframe(S, nargs);
+            ++Di->call_count;
             res = i->emit(S, i, n);
+            ++count;
             stack_popframe(S, base, 0);
             if (res) break;
         }
     }
     /* remove copied arguments */
+    /*printf("nui_top: %d\n", nui_gettop(S));*/
     nui_settop(S, -nargs-1);
+    /*printf("nui_top: %d\n", nui_gettop(S));*/
+    return count;
 }
 
 void nui_starttimer(NUIaction *a, unsigned delayed, unsigned interval) {
@@ -958,11 +978,12 @@ static void action_sweeplist(NUIstate *S, NUIactiondata **list) {
     while (*list != NULL) {
         NUIactiondata *D = *list;
         NUIaction *a = action_touser(D);
+        /*printf("!!! delete action: %p\n", a);*/
         if (a->deletor)
             a->deletor(S, a);
         nuiL_remove(D);
         nuiHL_remove(D);
-        nuiM_freemem(S, a, action_size(a->size));
+        nuiM_freemem(S, D, action_size(a->size));
     }
 }
 
@@ -1015,7 +1036,6 @@ void nuiA_updateactions(NUIstate *S) {
                     nui_stoptimer(a);
             }
             D->last_trigger_time = D->trigger_time;
-            ++D->call_count;
             D = next;
         }
     }
@@ -1166,7 +1186,7 @@ void nui_detach(NUInode *n) {
     NUInodedata *next = nuiL_empty(D) ? NULL : nuiL_next(D);
     NUInodedata *parent = D->parent;
     node_setparent(D, NULL);
-    nuiL_remove_safe(D);
+    nuiL_remove_init(D);
     if (parent) {
         if (parent->children == D)
             parent->children = next;
@@ -1320,10 +1340,8 @@ int nui_matchclass(NUInode *n, NUIstring *classname) {
 
 NUIclass *nui_nodeclass(NUInode *n)  { return node_todata(n)->klass; }
 NUIstring *nui_classname(NUInode *n) { return node_todata(n)->klass->name; }
-
 NUIpoint nui_position(NUInode *n) { return node_todata(n)->pos; }
 NUIsize nui_usersize(NUInode *n)  { return node_todata(n)->size; }
-
 int nui_isvisible(NUInode *n) { return node_todata(n)->visible; }
 
 void nui_setnodeaction(NUInode *n, NUIaction *a)

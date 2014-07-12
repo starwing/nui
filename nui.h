@@ -123,7 +123,7 @@ NUI_API void nui_unlinkaction(NUIaction *a);
 NUI_API NUIaction *nui_prevaction(NUIaction *a, NUIaction *curr);
 NUI_API NUIaction *nui_nextaction(NUIaction *a, NUIaction *curr);
 
-NUI_API void nui_emitaction(NUIaction *a, int nargs);
+NUI_API int nui_emitaction(NUIaction *a, int nargs);
 
 NUI_API void nui_starttimer(NUIaction *a, unsigned delayed, unsigned interval);
 NUI_API void nui_stoptimer(NUIaction *a);
