@@ -908,6 +908,22 @@ NUIaction *nui_nextaction(NUIaction *a, NUIaction *curr) {
     return curr == a ? NULL : curr;
 }
 
+NUIaction *nui_indexaction(NUIaction *a, int idx) {
+    NUIactiondata *D = action_todata(a);
+    NUIactiondata *i;
+    if (idx >= 0) {
+        nuiL_foreach(i, D)
+            if (idx-- == 0)
+                return action_touser(i);
+    }
+    else {
+        nuiL_foreach_back(i, D)
+            if (++idx == 0)
+                return action_touser(i);
+    }
+    return NULL;
+}
+
 int nui_emitaction(NUIaction *a, int nargs) {
     NUIactiondata *D = action_todata(a), *Di, *next;
     NUIstate *S = a->S;
@@ -1072,6 +1088,8 @@ static void node_setparent(NUInodedata *Dn, NUInodedata *Dparent) {
 static void node_delete(NUIstate *S, NUInodedata *Dn) {
     NUInode *n = node_touser(Dn);
     nui_detach(n);
+    if (n->deletor != NULL)
+        n->deletor(S, n);
     if (Dn->klass->delete_node)
         Dn->klass->delete_node(Dn->klass, n);
     nui_freetable(Dn->klass->S, &Dn->attrs);
@@ -1101,6 +1119,7 @@ NUInode *nui_node(NUIstate *S, NUIstring *classname) {
     D->handle = NULL;
     D->user.id = NULL;
     D->user.action = NULL;
+    D->user.deletor = NULL;
     /*n->user.layout_params = NULL;*/
 
     if (D->klass->new_node
@@ -1304,7 +1323,7 @@ size_t nui_childcount(NUInode *n) {
 #endif
 }
 
-NUInode *nui_index(NUInode *n, int idx) {
+NUInode *nui_indexnode(NUInode *n, int idx) {
     NUInodedata *D = node_todata(n);
     NUInodedata *i;
     if (D->children == NULL
@@ -1350,16 +1369,37 @@ void nui_setnodeaction(NUInode *n, NUIaction *a)
 NUIaction *nui_getnodeaction(NUInode *n)
 { return n->action; }
 
+static int ptinnode(NUInodedata *D, NUIpoint pt) {
+    return D->pos.x <= pt.x && D->pos.y <= pt.y
+        && D->pos.x+D->size.width > pt.x
+        && D->pos.y+D->size.height > pt.y;
+}
+
 NUInode *nui_nodefrompos(NUInode *n, NUIpoint pos) {
-    NUInode *i;
-    for (i = n; i != NULL; i = nui_nextleaf(i, n)) {
+    NUInodedata *D = node_todata(n);
+    NUInode *res = n, *i = NULL;
+    if (!ptinnode(D, pos)) return NULL;
+    while ((i = nui_nextleaf(n, i)) != NULL) {
         NUInodedata *Di = node_todata(i);
-        if (Di->pos.x >= pos.x && Di->pos.y >= pos.y
-                && Di->pos.x+Di->size.width < pos.x
-                && Di->pos.y+Di->size.height < pos.y)
+        if (!ptinnode(Di, pos)) /* skip to next tree */
+            i = nui_prevleaf(i, NULL);
+        else if (res = i, Di->children == NULL)
             break;
     }
-    return i;
+    return res;
+#if 0
+    NUInodedata *D = node_todata(n);
+    NUInodedata *i, *res;
+    if (!ptinnode(D, pos)) return NULL;
+    if (D->children == NULL) return n;
+    res = nui_nodefrompos(node_touser(D->children), pos);
+    if (res != NULL) return res;
+    nuiL_foreach (i, D->children) {
+        NUInode *res = nui_nodefrompos(node_touser(i), pos);
+        if (res != NULL) return res;
+    }
+    return n;
+#endif
 }
 
 NUIpoint nui_abspos(NUInode *n) {

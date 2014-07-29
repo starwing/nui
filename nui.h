@@ -26,6 +26,7 @@
     X(FUNCTION,  NUIfuncptr*, function ) \
     X(POINT,     NUIpoint,    point    ) \
     X(SIZE,      NUIsize,     size     ) \
+    X(BUFFER,    NUIbuffer,   buffer   ) \
     X(ACTION,    NUIaction*,  action   ) \
     X(NODE,      NUInode*,    node     ) \
     X(STRING,    NUIstring*,  string   ) \
@@ -46,6 +47,11 @@ typedef struct NUIsize {
     int width, height;
 } NUIsize;
 
+typedef struct NUIbuffer {
+    size_t len;
+    char *s;
+} NUIbuffer;
+
 typedef enum NUItype {
     NUI_TNIL,
 #define X(name, type, var) NUI_T##name,
@@ -55,7 +61,8 @@ typedef enum NUItype {
 } NUItype;
 
 typedef struct NUIvalue {
-    NUItype type;
+    short type;
+    short fastidx;
     union {
 #define X(name, type, var) type var;
         NUI_VALUE_TYPES(X)
@@ -122,6 +129,7 @@ NUI_API void nui_unlinkaction(NUIaction *a);
 
 NUI_API NUIaction *nui_prevaction(NUIaction *a, NUIaction *curr);
 NUI_API NUIaction *nui_nextaction(NUIaction *a, NUIaction *curr);
+NUI_API NUIaction *nui_indexaction(NUIaction *a, int idx);
 
 NUI_API int nui_emitaction(NUIaction *a, int nargs);
 
@@ -133,6 +141,8 @@ NUI_API void nui_stoptimer(NUIaction *a);
 struct NUInode {
     NUIstring *id;
     NUIaction *action;
+
+    void (*deletor) (NUIstate *S, NUInode *n);
 };
 
 NUI_API NUInode *nui_node(NUIstate *S, NUIstring *class_name);
@@ -154,7 +164,7 @@ NUI_API NUInode *nui_root(NUInode *n);
 NUI_API NUInode *nui_prevleaf(NUInode *n, NUInode *curr);
 NUI_API NUInode *nui_nextleaf(NUInode *n, NUInode *curr);
 
-NUI_API NUInode *nui_index(NUInode *n, int idx);
+NUI_API NUInode *nui_indexnode(NUInode *n, int idx);
 NUI_API size_t   nui_childcount(NUInode *n);
 
 NUI_API void nui_setparent(NUInode *n, NUInode *parent);
@@ -213,17 +223,21 @@ NUI_INLINE NUIsize nui_size(int width, int height) {
     return sz;
 }
 
+NUI_INLINE NUIbuffer nui_buffer(char *s, size_t len) {
+    NUIbuffer buff;
+    buff.s = s;
+    buff.len = len;
+    return buff;
+}
+
 NUI_INLINE NUIvalue nui_nilvalue(void) {
-    NUIvalue v;
-    v.type = NUI_TNIL;
-    v.pointer = NULL;
+    NUIvalue v = { NUI_TNIL };
     return v;
 }
 
 #define X(name, vtype, var) \
     NUI_INLINE NUIvalue nui_##var##value(vtype var) { \
-        NUIvalue v;                                   \
-        v.type = NUI_T##name;                         \
+        NUIvalue v = { NUI_T##name };                 \
         v.var = var;                                  \
         return v;                                     \
     }
