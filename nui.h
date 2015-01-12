@@ -40,11 +40,11 @@ typedef struct NUIstring NUIstring;
 typedef void (*NUIfuncptr) (void);
 
 typedef struct NUIpoint {
-    int x, y;
+    float x, y;
 } NUIpoint;
 
 typedef struct NUIsize {
-    int width, height;
+    float width, height;
 } NUIsize;
 
 typedef struct NUIbuffer {
@@ -115,7 +115,7 @@ struct NUIaction {
     void (*deletor) (NUIstate *S, NUIaction *a);
 
     int (*copy) (NUIstate *S, NUIaction *from, NUIaction *to);
-    int (*emit) (NUIstate *S, NUIaction *a, NUInode *n);
+    int (*emit) (NUIstate *S, NUIaction *a, NUInode *n, float dt);
 };
 
 NUI_API NUIaction *nui_action(NUIstate *S, size_t sz);
@@ -133,7 +133,7 @@ NUI_API NUIaction *nui_indexaction(NUIaction *a, int idx);
 
 NUI_API int nui_emitaction(NUIaction *a, int nargs);
 
-NUI_API void nui_starttimer(NUIaction *a, unsigned delayed, unsigned interval);
+NUI_API void nui_starttimer(NUIaction *a, float delayed, float interval);
 NUI_API void nui_stoptimer(NUIaction *a);
 
 
@@ -209,14 +209,14 @@ NUI_API void       nui_setnodeaction(NUInode *n, NUIaction *a);
 # endif
 #endif /* NUI_INLINE */
 
-NUI_INLINE NUIpoint nui_point(int x, int y) {
+NUI_INLINE NUIpoint nui_point(float x, float y) {
     NUIpoint pt;
     pt.x = x;
     pt.y = y;
     return pt;
 }
 
-NUI_INLINE NUIsize nui_size(int width, int height) {
+NUI_INLINE NUIsize nui_size(float width, float height) {
     NUIsize sz;
     sz.width  = width;
     sz.height = height;

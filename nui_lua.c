@@ -278,7 +278,7 @@ static unsigned scb_time(NUIparams *params) {
     lua_rawgeti(L, LUA_REGISTRYINDEX, lp->refs[NUI_SCB_time]);
     if (handle_error(L, lbind_pcall(L, 0, 1), NULL))
         return 0;
-    time = lua_tounsigned(L, -1);
+    time = (float)lua_tonumber(L, -1);
     lua_pop(L, 1);
     return time;
 }
@@ -304,7 +304,7 @@ static int scb_wait(NUIparams *params, unsigned waittime) {
     if (lp->refs[NUI_SCB_wait] == LUA_REFNIL)
         return 0;
     lua_rawgeti(L, LUA_REGISTRYINDEX, lp->refs[NUI_SCB_wait]);
-    lua_pushunsigned(L, waittime);
+    lua_pushnumber(L, (lua_Number)waittime);
     if (handle_error(L, lbind_pcall(L, 1, 1), NULL))
         return 0;
     res = lua_toboolean(L, -1);
@@ -486,20 +486,21 @@ static void subaction_deletor(NUIstate *S, NUIaction *a) {
     }
 }
 
-static int subaction_emit(NUIstate *S, NUIaction *a, NUInode *n) {
+static int subaction_emit(NUIstate *S, NUIaction *a, NUInode *n, float dt) {
     LNUIsubaction *suba = (LNUIsubaction*)a;
     lua_State *L = suba->L;
     int res, i, nargs = nui_gettop(S);
     if (suba->func_ref == LUA_REFNIL) return 0;
     lua_rawgeti(L, LUA_REGISTRYINDEX, suba->func_ref);
     retrieve_or_wrap(L, suba, &lbT_Action);
+    lua_pushnumber(L, (lua_Number)dt);
     for (i = 1; i <= nargs; ++i) {
         NUIvalue v;
         nui_getvalue(S, i, &v);
         if (!push_value(L, v))
             lua_pushnil(L);
     }
-    if (lbind_pcall(L, nargs + 1, 1) != LUA_OK)
+    if (lbind_pcall(L, nargs + 2, 1) != LUA_OK)
         luaL_error(L, "action(%p, Node: %p): %s",
                 suba, n, lua_tostring(L, -1));
     res = lua_toboolean(L, -1);
@@ -1083,8 +1084,8 @@ static int Lnode_frompos(lua_State *L) {
     NUInode *n = lbind_check(L, 1, &lbT_Node);
     NUInode *res;
     NUIpoint pt;
-    pt.x = luaL_checkint(L, 2);
-    pt.y = luaL_checkint(L, 3);
+    pt.x = (float)luaL_checknumber(L, 2);
+    pt.y = (float)luaL_checknumber(L, 3);
     res = nui_nodefrompos(n, pt);
     return retrieve_node(L, res);
 }
@@ -1092,40 +1093,40 @@ static int Lnode_frompos(lua_State *L) {
 static int Lnode_abspos(lua_State *L) {
     NUInode *n = lbind_check(L, 1, &lbT_Node);
     NUIpoint pt = nui_abspos(n);
-    lua_pushinteger(L, pt.x);
-    lua_pushinteger(L, pt.y);
+    lua_pushnumber(L, (lua_Number)pt.x);
+    lua_pushnumber(L, (lua_Number)pt.y);
     return 2;
 }
 
 static int Lnode_position(lua_State *L) {
     NUInode *n = lbind_check(L, 1, &lbT_Node);
     NUIpoint pt = nui_position(n);
-    lua_pushinteger(L, pt.x);
-    lua_pushinteger(L, pt.y);
+    lua_pushnumber(L, (lua_Number)pt.x);
+    lua_pushnumber(L, (lua_Number)pt.y);
     return 2;
 }
 
 static int Lnode_usersize(lua_State *L) {
     NUInode *n = lbind_check(L, 1, &lbT_Node);
     NUIsize sz = nui_usersize(n);
-    lua_pushinteger(L, sz.width);
-    lua_pushinteger(L, sz.height);
+    lua_pushnumber(L, (lua_Number)sz.width);
+    lua_pushnumber(L, (lua_Number)sz.height);
     return 2;
 }
 
 static int Lnode_naturalsize(lua_State *L) {
     NUInode *n = lbind_check(L, 1, &lbT_Node);
     NUIsize sz = nui_naturalsize(n);
-    lua_pushinteger(L, sz.width);
-    lua_pushinteger(L, sz.height);
+    lua_pushnumber(L, (lua_Number)sz.width);
+    lua_pushnumber(L, (lua_Number)sz.height);
     return 2;
 }
 
 static int Lnode_move(lua_State *L) {
     NUInode *n = lbind_check(L, 1, &lbT_Node);
     NUIpoint pt;
-    pt.x = luaL_checkint(L, 2);
-    pt.y = luaL_checkint(L, 3);
+    pt.x = (float)luaL_checknumber(L, 2);
+    pt.y = (float)luaL_checknumber(L, 3);
     nui_move(n, pt);
     lbind_returnself(L);
 }
@@ -1133,8 +1134,8 @@ static int Lnode_move(lua_State *L) {
 static int Lnode_resize(lua_State *L) {
     NUInode *n = lbind_check(L, 1, &lbT_Node);
     NUIsize sz;
-    sz.width = luaL_checkint(L, 2);
-    sz.height = luaL_checkint(L, 3);
+    sz.width  = (float)luaL_checknumber(L, 2);
+    sz.height = (float)luaL_checknumber(L, 3);
     nui_resize(n, sz);
     lbind_returnself(L);
 }
@@ -1799,8 +1800,8 @@ static int ccb_node_move(NUIclass *c, NUInode *n, NUIpoint pos) {
         return 0;
     lua_rawgeti(L, LUA_REGISTRYINDEX, lc->refs[NUI_CCB_node_move]);
     retrieve_node(L, n);
-    lua_pushinteger(L, pos.x);
-    lua_pushinteger(L, pos.y);
+    lua_pushnumber(L, (lua_Number)pos.x);
+    lua_pushnumber(L, (lua_Number)pos.y);
     if (handle_error(L, lbind_pcall(L, 3, 1), NULL))
         return 0;
     res = lua_toboolean(L, -1);
@@ -1816,8 +1817,8 @@ static int ccb_node_resize(NUIclass *c, NUInode *n, NUIsize size) {
         return 0;
     lua_rawgeti(L, LUA_REGISTRYINDEX, lc->refs[NUI_CCB_node_resize]);
     retrieve_node(L, n);
-    lua_pushinteger(L, size.width);
-    lua_pushinteger(L, size.height);
+    lua_pushnumber(L, (lua_Number)size.width);
+    lua_pushnumber(L, (lua_Number)size.height);
     if (handle_error(L, lbind_pcall(L, 3, 1), NULL))
         return 0;
     res = lua_toboolean(L, -1);
@@ -1852,8 +1853,8 @@ static int ccb_layout_naturalsize(NUIclass *c, NUInode *n, NUIsize *psz) {
     if (lua_isnil(L, -1))
         return 0;
     if (psz) {
-        psz->width  = lua_tointeger(L, -2);
-        psz->height = lua_tointeger(L, -1);
+        psz->width  = (float)lua_tonumber(L, -2);
+        psz->height = (float)lua_tonumber(L, -1);
     }
     lua_pop(L, 2);
     return 1;
@@ -1916,15 +1917,15 @@ static void open_class(lua_State *L) {
 static int Lutils_point(lua_State *L) {
     NUIvalue v;
     if (lua_gettop(L) == 2) {
-        int x = luaL_checkint(L, 1);
-        int y = luaL_checkint(L, 2);
+        float x = (float)luaL_checknumber(L, 1);
+        float y = (float)luaL_checknumber(L, 2);
         v = nui_pointvalue(nui_point(x, y));
         push_value(L, v);
         return 1;
     }
     else if (test_value(L, 1, &v) && v.type == NUI_TPOINT) {
-        lua_pushinteger(L, v.point.x);
-        lua_pushinteger(L, v.point.y);
+        lua_pushnumber(L, (lua_Number)v.point.x);
+        lua_pushnumber(L, (lua_Number)v.point.y);
         return 2;
     }
     return 0;
@@ -1933,15 +1934,15 @@ static int Lutils_point(lua_State *L) {
 static int Lutils_size(lua_State *L) {
     NUIvalue v;
     if (lua_gettop(L) == 2) {
-        int width = luaL_checkint(L, 1);
-        int height = luaL_checkint(L, 2);
+        float width  = (float)luaL_checknumber(L, 1);
+        float height = (float)luaL_checknumber(L, 2);
         v = nui_sizevalue(nui_size(width, height));
         push_value(L, v);
         return 1;
     }
     else if (test_value(L, 1, &v) && v.type == NUI_TSIZE) {
-        lua_pushinteger(L, v.size.width);
-        lua_pushinteger(L, v.size.height);
+        lua_pushnumber(L, (lua_Number)v.size.width);
+        lua_pushnumber(L, (lua_Number)v.size.height);
         return 2;
     }
     return 0;
@@ -1967,5 +1968,5 @@ LUALIB_API int luaopen_nui(lua_State *L) {
     return 1;
 }
 /* cc: flags+='-s -O2 -shared -DLUA_BUILD_AS_DLL -DNUI_DLL'
- * cc: libs+='-llua52.dll' run='lua test.lua'
+ * cc: libs+='-llua53.dll' run='lua test.lua'
  * cc: input+='nui.c' output="nui.dll" */

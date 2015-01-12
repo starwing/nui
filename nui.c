@@ -191,9 +191,9 @@ struct NUIactiondata {
     NUIactiondata *prev_linked;
 
     unsigned call_count;
-    unsigned last_trigger_time;
-    unsigned trigger_time;
-    unsigned interval;
+    float last_trigger_time;
+    float trigger_time;
+    float interval;
 
     NUIaction user;
 };
@@ -931,6 +931,7 @@ int nui_emitaction(NUIaction *a, int nargs) {
     int res = 0, is_single = nuiL_empty(D);
     int count = 0;
     size_t base;
+    float time = nui_time(S);
 
     /*printf("nui_top: %d\n", nui_gettop(S));*/
     /*printf("emitaction(%d): is_single=%d\n", nargs, is_single);*/
@@ -942,7 +943,8 @@ int nui_emitaction(NUIaction *a, int nargs) {
             nui_copyvalues(S, nargs);
         base = stack_newframe(S, nargs);
         ++D->call_count;
-        res = a->emit(S, a, n);
+        res = a->emit(S, a, n, time - D->last_trigger_time);
+        D->last_trigger_time = time;
         ++count;
         stack_popframe(S, base, 0);
     }
@@ -955,7 +957,8 @@ int nui_emitaction(NUIaction *a, int nargs) {
             nui_copyvalues(S, nargs);
             base = stack_newframe(S, nargs);
             ++Di->call_count;
-            res = i->emit(S, i, n);
+            res = i->emit(S, i, n, time - Di->last_trigger_time);
+            Di->last_trigger_time = time;
             ++count;
             stack_popframe(S, base, 0);
             if (res) break;
@@ -968,7 +971,7 @@ int nui_emitaction(NUIaction *a, int nargs) {
     return count;
 }
 
-void nui_starttimer(NUIaction *a, unsigned delayed, unsigned interval) {
+void nui_starttimer(NUIaction *a, float delayed, float interval) {
     NUIactiondata *D = action_todata(a), **list;
     if (a->S->is_closing) return;
     D->trigger_time = nui_time(a->S) + delayed;
