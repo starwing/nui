@@ -28,7 +28,7 @@ typedef void NUIdeletor(NUIstate *S, void *p);
 struct NUIparams {
     void (*deletor)(NUIparams *params);
     void (*error)(NUIparams *params, const char *msg);
-    unsigned (*time)(NUIparams *params);
+    float (*time)(NUIparams *params);
     int  (*poll)(NUIparams *params);
     int  (*wait)(NUIparams *params, unsigned waittime);
     void (*quit)(NUIparams *params);

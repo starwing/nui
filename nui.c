@@ -1743,10 +1743,10 @@ void nui_breakloop(NUIstate *S) {
         S->params->quit(S->params);
 }
 
-unsigned nui_time(NUIstate *S) {
+float nui_time(NUIstate *S) {
     if (S->params->time != NULL)
         return S->params->time(S->params);
-    return (unsigned)clock();
+    return (float)clock() / CLOCKS_PER_SEC;
 }
 
 static void params_deletor(NUIparams *params) {
@@ -1855,5 +1855,5 @@ int nui_loop(NUIstate *S) {
 
 
 /* cc: flags+='-g -shared -DLUA_BUILD_AS_DLL -DNUI_DLL'
- * cc: libs+='-llua52.dll' run='lua test.lua'
+ * cc: libs+='-llua53.dll' run='lua test.lua'
  * cc: input+='nui_lua.c' output="nui.dll" */

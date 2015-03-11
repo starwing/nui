@@ -1,4 +1,4 @@
-/* NUI - a native, node-based UI library */
+/* NUI - a native, node-based UI framework */
 #ifndef nui_h
 #define nui_h
 
@@ -104,7 +104,7 @@ NUI_API int  nui_pollevents(NUIstate *S);
 NUI_API int  nui_waitevents(NUIstate *S);
 NUI_API void nui_breakloop(NUIstate *S);
 
-NUI_API unsigned nui_time(NUIstate *S);
+NUI_API float nui_time(NUIstate *S);
 
 
 struct NUIaction {
