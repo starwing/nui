@@ -53,7 +53,7 @@ static void removed(NUIlistener *li, NUInode *parent, NUInode *self)
 static int new_componment(NUItype *t, NUInode *n, NUIcomp *comp) {
     NUIcomp_observer *self = (NUIcomp_observer*)comp;
     self->li.add_child = add_child;
-    self->li.remove_child = remove_child;
+    self->li.del_child = remove_child;
     self->li.added = added;
     self->li.removed = removed;
     nui_addlistener(n, &self->li);
@@ -67,8 +67,8 @@ static void delete_node(NUItype *t, NUInode *n, NUIcomp *comp) {
 
 static NUItype *open_observer_type(NUIstate *S) {
     NUItype *t = nui_newtype(S, NUI_(observer), 0, sizeof(NUIcomp_observer));
-    t->new_componment = new_componment;
-    t->delete_node = delete_node;
+    t->new_comp = new_componment;
+    t->del_comp = delete_node;
     return t;
 }
 
@@ -194,3 +194,4 @@ int main(void) {
     test_timer();
     return 0;
 }
+/* cc: flags+='-ggdb' */
