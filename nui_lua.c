@@ -41,13 +41,13 @@ static void ln_unref(lua_State *L, int *ref) {
 
 static int ln_pushnode(lua_State *L, NUInode *n) {
     if (n == NULL) return 0;
-    if (!lua_rawgetp(L, LUA_REGISTRYINDEX, n))
+    if (!lua53_rawgetp(L, LUA_REGISTRYINDEX, n))
         lbind_wrap(L, n, &lbT_Node);
     return 1;
 }
 
 static int ln_pushkey(lua_State *L, NUIkey *key) {
-    lua_pushlstring(L, (const char*)key, nui_len(key));
+    lua_pushlstring(L, (const char*)key, nui_keylen(key));
     return 1;
 }
 
@@ -72,7 +72,7 @@ static NUItime lnui_ontimer(void *ud, NUItimer *timer, NUItime elapsed) {
         fprintf(stderr, "%s\n", lua_tostring(L, -1));
         ln_unref(L, &obj->ref);
     }
-    else if (lua_isinteger(L, -1)) {
+    else if (lua_isnumber(L, -1)) {
         lua_Integer ret = lua_tointeger(L, -1);
         return ret >= 0 ? (NUItime)ret : 0;
     }
@@ -383,7 +383,7 @@ static int Lnode_setenv(lua_State *L) {
     int i = 1;
     luaL_checktype(L, 2, LUA_TTABLE);
     nui_setchildren(n, NULL);
-    while (lua_rawgeti(L, 2, i) == LUA_TUSERDATA
+    while (lua53_rawgeti(L, 2, i) == LUA_TUSERDATA
             && (cur = (NUInode*)lbind_test(L, -1, &lbT_Node)) != NULL) {
         nui_setparent(cur, n);
         lua_pushnil(L);
@@ -422,7 +422,7 @@ static int Lnode_arrayf(lua_State *L) {
     newnode = (NUInode*)lbind_check(L, 3, &lbT_Node);
     nui_insert(old, newnode);
     nui_detach(old);
-    if (lua_getuservalue(L, 1) != LUA_TNIL) {
+    if (lua53_getuservalue(L, 1) != LUA_TNIL) {
         lua_pushnil(L);
         lua_rawsetp(L, -2, old);
         lua_pushvalue(L, 3);
@@ -535,7 +535,7 @@ static int Lnode_parent(lua_State *L) {
         return ln_pushnode(L, nui_parent(n));
     parent = (NUInode*)lbind_check(L, 3, &lbT_Node);
     nui_setparent(n, parent);
-    if (lua_getuservalue(L, 3) != LUA_TNIL) {
+    if (lua53_getuservalue(L, 3) != LUA_TNIL) {
         lua_pushvalue(L, 1);
         lua_rawsetp(L, -2, parent);
     }
@@ -622,11 +622,11 @@ static int Lstate_new(lua_State *L) {
     }
     else {
         luaL_checktype(L, 1, LUA_TTABLE);
-        if (lua_getfield(L, 1, "time") != LUA_TNIL) {
+        if (lua53_getfield(L, 1, "time") != LUA_TNIL) {
             LS->ref_time = luaL_ref(L, LUA_REGISTRYINDEX);
             LS->params.time = ln_time;
         }
-        if (lua_getfield(L, 1, "wait") != LUA_TNIL) {
+        if (lua53_getfield(L, 1, "wait") != LUA_TNIL) {
             LS->ref_wait = luaL_ref(L, LUA_REGISTRYINDEX);
             LS->params.wait = ln_wait;
         }
@@ -668,5 +668,7 @@ LUALIB_API int luaopen_nui(lua_State *L) {
     open_state(L);
     return 1;
 }
-/* cc: flags+='-mdll -s -O3 -DLUA_BUILD_AS_DLL'
- * cc: libs+='-llua53' output='nui.dll' */
+/* win32cc: flags+='-mdll -s -O3 -DLUA_BUILD_AS_DLL'
+ * win32cc: libs+='-llua53' output='nui.dll'
+ * maccc: flags+='-bundle -O2 -undefined dynamic_lookup'
+ * maccc: libs+='-llua53' output='nui.dll' */

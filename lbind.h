@@ -308,6 +308,7 @@ LB_NS_BEGIN
 # define lua53_gettable     lua_gettable
 # define lua53_getfield     lua_getfield
 # define lua53_rawget       lua_rawget
+# define lua53_rawgeti      lua_rawgeti
 # define lua53_rawgetp      lua_rawgetp
 # define lua53_rotate       lua_rotate
 #else
@@ -319,6 +320,8 @@ static int lua53_getfield(lua_State *L, int idx, const char *field)
 { lua_getfield(L, idx, field); return lua_type(L, -1); }
 static int lua53_rawget(lua_State *L, int idx)
 { lua_rawget(L, idx); return lua_type(L, -1); }
+static int lua53_rawgeti(lua_State *L, int idx, int i)
+{ lua_rawgeti(L, idx, i); return lua_type(L, -1); }
 static int lua53_rawgetp(lua_State *L, int idx, const void *p)
 { lua_rawgetp(L, idx, p); return lua_type(L, -1); }
 
@@ -441,11 +444,11 @@ static void luaL_traceback(lua_State *L, lua_State *L1, const char *msg, int lev
 #define LBIND_UDBOX   0xC5E7DB07
 
 static int lbB_retrieve(lua_State *L, unsigned id) {
-  if (lua53_rawgetp(L, LUA_REGISTRYINDEX, (void*)id) == LUA_TNIL) {
+  if (lua53_rawgetp(L, LUA_REGISTRYINDEX, (void*)(ptrdiff_t)id) == LUA_TNIL) {
     lua_pop(L, 1);
     lua_newtable(L);
     lua_pushvalue(L, -1);
-    lua_rawsetp(L, LUA_REGISTRYINDEX, (void*)id);
+    lua_rawsetp(L, LUA_REGISTRYINDEX, (void*)(ptrdiff_t)id);
     return 1;
   }
   return 0;
@@ -1664,6 +1667,8 @@ LB_NS_END
 
 #endif /* LBIND_IMPLEMENTATION */
 /* vim: set sw=2: */
-/* cc: lua='lua53' flags+='-s -O2 -Wall -std=c99 -pedantic -mdll -Id:/$lua/include'
- * cc: flags+='-DLBIND_IMPLEMENTATION -xc' output='lbind.dll'
- * cc: run='$lua tt.lua' libs+='-L D:/$lua -l$lua' */
+/* win32cc: lua='lua53' flags+='-s -O2 -Wall -std=c99 -pedantic -mdll -Id:/$lua/include'
+ * win32cc: flags+='-DLBIND_IMPLEMENTATION -xc' output='lbind.dll' libs+='-l$lua'
+ * maccc: lua='lua53' flags+='-bundle -undefined dynamic_lookup -O2 -Wall -std=c99 -pedantic'
+ * maccc: flags+='-DLBIND_IMPLEMENTATION -xc' output='lbind.so'
+ * cc: run='$lua tt.lua' */
