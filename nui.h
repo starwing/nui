@@ -1256,7 +1256,7 @@ NUI_API int nui_release(NUInode *n) {
 }
 
 NUI_API void nui_setparent(NUInode *n, NUInode *parent) {
-    if (parent == n->parent) return;
+    if (n == NULL || parent == n->parent) return;
     nuiN_emitevent(NUI_remove_child, 0, n, n->parent);
     nuiN_detach(n);
     n->parent = parent;
@@ -1671,6 +1671,7 @@ NUI_API NUIstate *nui_newstate(NUIparams *params) {
 }
 
 NUI_API void nui_close(NUIstate *S) {
+    NUIparams *params = S->params;
     NUInode *n = &S->base;
     nuiN_delete(n, 0);
     n = S->freenodes;
@@ -1684,13 +1685,13 @@ NUI_API void nui_close(NUIstate *S) {
         S->params->close(S->params);
     nuiC_close(S);
     nuiT_cleartimers(S);
+    nuiS_close(S);
     nui_freepool(S, &S->eventpool);
     nui_freepool(S, &S->handlerpool);
     nui_freepool(S, &S->nodepool);
     nui_freepool(S, &S->smallpool);
-    nuiS_close(S);
-    S->params->alloc(S->params, S, 0, sizeof(NUIstate));
-    S->params->S = NULL;
+    params->alloc(S->params, S, 0, sizeof(NUIstate));
+    params->S = NULL;
 }
 
 NUI_API int nui_pollevents(NUIstate *S) {
