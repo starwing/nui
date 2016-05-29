@@ -1,31 +1,48 @@
 #include <stdio.h>
-#define NUI_DEBUG_MEM printf
 #define NUI_IMPLEMENTATION
 #include "nui.h"
+
+static size_t allmem;
+
+static void *debug_alloc(NUIparams *params, void *ptr, size_t nsize, size_t osize) {
+    if (params->S == NULL) {
+        allmem = 0;
+        printf("[M] *** state init ***\n");
+    }
+    if (nsize == 0) {
+        allmem -= osize;
+        printf("[M] free:    %d (%d)\n", (int)allmem, (int)osize);
+        if (ptr == params->S) {
+            assert(allmem == 0);
+            printf("[M] *** state free ***\n");
+        }
+        free(ptr);
+        return NULL;
+    }
+    if (ptr == NULL) {
+        assert(osize == 0);
+        allmem += nsize;
+        printf("[M] malloc:  %d (%d)\n", (int)allmem, (int)nsize);
+        return malloc(nsize);
+    }
+    allmem += nsize;
+    allmem -= osize;
+    printf("[M] realloc: %d (%d->%d)\n", (int)allmem, (int)osize, (int)nsize);
+    return realloc(ptr, nsize);
+}
 
 typedef struct NUIcomp_name {
     NUIcomp base;
     const char *name;
 } NUIcomp_name;
 
-typedef struct NUIcomp_observer {
-    NUIcomp base;
-    NUIlistener li;
-} NUIcomp_observer;
-
-static void setname(NUInode *n, const char *name) {
-    NUIstate *S = nui_state(n);
-    NUItype *t = nui_gettype(S, NUI_(name));
-    NUIcomp_name *comp = NULL;
-    if (t) comp = (NUIcomp_name*)nui_getcomp(n, t);
-    if (comp) comp->name = name;
-}
-
 static void putname(NUInode *n) {
     NUIstate *S = nui_state(n);
-    NUItype *t = nui_gettype(S, NUI_(name));
+    NUItype *t;
     NUIcomp_name *comp = NULL;
     const char *name = NULL;
+    if (S == NULL) { printf("NULL"); return; }
+    t = nui_gettype(S, NUI_(name));
     if (t) comp = (NUIcomp_name*)nui_getcomp(n, t);
     if (comp) name = comp->name;
     if (name != NULL)
@@ -38,49 +55,52 @@ static NUItype *open_name_type(NUIstate *S) {
     return nui_newtype(S, NUI_(name), 0, sizeof(NUIcomp_name));
 }
 
-static void add_child(NUIlistener *li, NUInode *self, NUInode *child)
-{ printf("add_child:\t"); putname(self); printf(" -> "); putname(child); printf("\n"); }
+static NUInode *new_named_node(NUIstate *S, const char *name) {
+    NUInode *n = nui_newnode(S);
+    NUIcomp_name *comp = (NUIcomp_name*)nui_addcomp(n, nui_gettype(S, NUI_(name)));
+    comp->name = name;
+    nui_setparent(n, nui_rootnode(S));
+    return n;
+}
 
-static void remove_child(NUIlistener *li, NUInode *self, NUInode *child)
-{ printf("remove_child:\t"); putname(self); printf(" -> "); putname(child); printf("\n"); }
+static void add_child(void *ud, NUInode *n, NUIevent *evt) {
+    NUIstate *S = nui_state(n);
+    NUIentry *e = nui_gettable(nui_eventdata(evt), NUI_(child));
+    printf("add_child:\t");
+    putname(nui_eventnode(evt));
+    printf(" <- ");
+    putname((NUInode*)e->value);
+    printf("\n");
+}
 
-static void added(NUIlistener *li, NUInode *parent, NUInode *self)
-{ printf("added:\t\t"); putname(parent); printf(" -> "); putname(self); printf("\n"); }
+static void remove_child(void *ud, NUInode *n, NUIevent *evt) {
+    NUIstate *S = nui_state(n);
+    NUIentry *e = nui_gettable(nui_eventdata(evt), NUI_(child));
+    printf("remove_child:\t");
+    putname(nui_eventnode(evt));
+    printf(" <- ");
+    putname((NUInode*)e->value);
+    printf("\n");
+}
 
-static void removed(NUIlistener *li, NUInode *parent, NUInode *self)
-{ printf("removed:\t"); putname(parent); printf(" -> "); putname(self); printf("\n"); }
+static void delete_node(void *ud, NUInode *n, NUIevent *evt) {
+    printf("delete:\t\t"); putname(nui_eventnode(evt)); printf("\n");
+}
 
-static int new_componment(NUItype *t, NUInode *n, NUIcomp *comp) {
-    NUIcomp_observer *self = (NUIcomp_observer*)comp;
-    self->li.add_child = add_child;
-    self->li.del_child = remove_child;
-    self->li.added = added;
-    self->li.removed = removed;
-    nui_addlistener(n, &self->li);
+static int add_listener(NUIstate *S) {
+    nui_addhandler(nui_rootnode(S), NUI_(add_child), 1, add_child, NULL);
+    nui_addhandler(nui_rootnode(S), NUI_(remove_child), 1, remove_child, NULL);
+    nui_addhandler(nui_rootnode(S), NUI_(delete_node), 1, delete_node, NULL);
+    nui_addhandler(nui_rootnode(S), NUI_(add_child), 0, add_child, NULL);
+    nui_addhandler(nui_rootnode(S), NUI_(remove_child), 0, remove_child, NULL);
+    nui_addhandler(nui_rootnode(S), NUI_(delete_node), 0, delete_node, NULL);
     return 1;
 }
 
-static void delete_node(NUItype *t, NUInode *n, NUIcomp *comp) {
-    NUIcomp_observer *self = (NUIcomp_observer*)comp;
-    nui_dellistener(n, &self->li);
-}
-
-static NUItype *open_observer_type(NUIstate *S) {
-    NUItype *t = nui_newtype(S, NUI_(observer), 0, sizeof(NUIcomp_observer));
-    t->new_comp = new_componment;
-    t->del_comp = delete_node;
-    return t;
-}
-
 static void test_mem(void) {
-    NUIparams params = { NULL };
+    NUIparams params = { debug_alloc };
     NUIstate *S = nui_newstate(&params);
     printf("new state: %p\n", S);
-
-    NUIpoller p = { NULL };
-    nui_addpoller(S, &p);
-    nui_delpoller(S, &p);
-    printf("new poller: %p\n", &p);
 
     NUItimer *timer = nui_newtimer(S, NULL, NULL);
     printf("new timer: %p\n", timer);
@@ -89,54 +109,61 @@ static void test_mem(void) {
     printf("new key: %p\n", name);
     printf("new key: %p\n", NUI_(observer));
 
-    NUInode *n = nui_newnode(S, NULL, 0);
+    NUInode *n = nui_newnode(S); /* a pending node */
+    n = nui_newnode(S);
     printf("new node: %p\n", n);
 
-    NUIlistener li = { NULL };
-    nui_addlistener(n, &li);
-    nui_dellistener(n, &li);
-    printf("new listener: %p\n", &li);
+    NUIevent *ev = nui_newevent(S, NUI_(test), 1, 1);
+    nui_settable(S, nui_eventdata(ev), NUI_(foo))->value = nui_strdata(S, "bar");
+    nui_emitevent(n, ev);
+    printf("new event: %p\n", ev);
+    nui_deldata(S, (NUIdata*)nui_gettable(nui_eventdata(ev), NUI_(foo))->value);
+    nui_delevent(ev);
 
     NUIattr attr = { NULL };
-    nui_addattr(n, NUI_(attr), &attr);
+    nui_setattr(n, NUI_(attr), &attr);
     nui_delattr(n, NUI_(attr));
     printf("new attr: %p\n", &attr);
 
     nui_release(n);
     printf("release node\n");
 
-    NUItype *t = nui_newtype(S, NUI_(observer), 0, sizeof(NUIcomp_observer));
+    NUItype *t = nui_newtype(S, NUI_(observer), 0, sizeof(NUIcomp_name));
     printf("new type: %p\n", t);
 
-    n = nui_newnode(S, &t, 1);
-    printf("new node with type: %p\n", n);
+    NUInode *n1 = nui_newnode(S);
+    nui_setparent(n1, nui_rootnode(S));
+    NUIcomp *comp1 = nui_addcomp(n1, t);
+    printf("new node with type: %p\n1", n1);
 
-    NUIcomp *comp = nui_getcomp(n, t);
-    assert(comp == nui_addcomp(n, t));
+    NUIcomp *comp = nui_getcomp(n1, t);
+    assert(comp == comp1);
+    assert(comp == nui_addcomp(n1, t));
 
-    n = nui_newnode(S, NULL, 0);
-    comp = nui_addcomp(n, t);
-    assert(comp == nui_getcomp(n, t));
+    NUInode *n2 = nui_newnode(S);
+    nui_setparent(n2, n1);
+    comp = nui_addcomp(n2, t);
+    assert(comp == nui_getcomp(n2, t));
 
     nui_close(S);
 }
 
 static void test_node(void) {
-    NUIparams params = { NULL };
+    NUIparams params = { debug_alloc };
     NUIstate *S = nui_newstate(&params);
-    NUItype *t1 = open_observer_type(S);
-    NUItype *t2 = open_name_type(S);
-    NUItype *ts[] = { t1, t2 };
+    NUItype *t = open_name_type(S);
+    ((NUIcomp_name*)nui_addcomp(nui_rootnode(S), t))->name = "root";
+    add_listener(S);
     printf("-------------\n");
-    NUInode *n = nui_newnode(S, ts, 2);  setname(n, "n");   
+    NUInode *n = new_named_node(S, "n");
     printf("-------------\n");                                  
-    NUInode *n1 = nui_newnode(S, ts, 2); setname(n1, "n1"); 
-    printf("-------------\n");                                  
-    NUInode *n2 = nui_newnode(S, ts, 2); setname(n2, "n2"); 
-    printf("-------------\n");                                  
-    NUInode *n3 = nui_newnode(S, ts, 2); setname(n3, "n3"); 
-    printf("-------------\n");                                  
-    NUInode *n4 = nui_newnode(S, ts, 2); setname(n4, "n4"); 
+    NUInode *n1 = new_named_node(S, "n1");
+    printf("-------------\n");
+    NUInode *n2 = new_named_node(S, "n2");
+    printf("-------------\n");
+    NUInode *n3 = new_named_node(S, "n3");
+    printf("-------------\n");
+    NUInode *n4 = new_named_node(S, "n4");
     printf("-------------\n");
 
     nui_setparent(n1, n);
@@ -151,6 +178,7 @@ static void test_node(void) {
     assert(nui_nodeindex(nui_indexnode(n, 2)) == 2);
 
     nui_setchildren(n4, n1);
+    nui_setparent(n4, NULL);
     assert(nui_childcount(n) == 0);
     assert(nui_nodeindex(n4) == -1);
 
@@ -176,7 +204,7 @@ static NUItime on_timer(void *ud, NUItimer *t, NUItime elapsed) {
 }
 
 static void test_timer(void) {
-    NUIparams params = { NULL };
+    NUIparams params = { debug_alloc };
     NUIstate *S = nui_newstate(&params);
     nui_starttimer(nui_newtimer(S, on_timer, NULL), 1000);
     nui_starttimer(nui_newtimer(S, on_timer, NULL), 2000);
