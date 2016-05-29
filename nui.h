@@ -1187,13 +1187,19 @@ static int nuiN_emitevent(int id, int cancelable, NUInode *n, NUInode *parent) {
     return ret;
 }
 
-static void nuiN_childrenevents(int id, NUInode *parent) {
+static void nuiN_childrenevents(NUIstate *S, int id, NUInode *parent) {
+    NUIkey *child = S->builtins[NUI_child];
     NUInode *i, *next;
-    if (!parent) return;
+    NUIevent *evt;
+    assert(id == NUI_add_child || id == NUI_remove_child);
+    if (parent == NULL || parent->children == NULL) return;
+    evt = nui_newevent(S, S->builtins[id], 0, 0);
     for (i = nui_nextchild(parent, NULL); i != NULL; i = next) {
         next = nui_nextchild(parent, i);
-        nuiN_emitevent(id, 0, i, parent);
+        nui_settable(S, &evt->data, child)->value = i;
+        nui_emitevent(parent, evt);
     }
+    nui_delevent(evt);
 }
 
 static void nuiN_cleanchildren(NUInode *n) {
@@ -1262,12 +1268,7 @@ NUI_API void nui_setparent(NUInode *n, NUInode *parent) {
     n->parent = parent;
     if (parent == NULL) { nuiN_append(&n->S->freenodes, n); return; }
     if (parent == n) { n->parent = NULL; return; }
-    if (parent->children)
-        nuiN_insert(parent->children, n);
-    else {
-        n->next_sibling = n->prev_sibling = n;
-        parent->children = n;
-    }
+    nuiN_append(&parent->children, n);
     ++parent->child_count;
     nuiN_emitevent(NUI_add_child, 0, n, parent);
 }
@@ -1275,9 +1276,9 @@ NUI_API void nui_setparent(NUInode *n, NUInode *parent) {
 NUI_API void nui_setchildren(NUInode *n, NUInode *newnode) {
     NUInode *i, *next;
     if (n == NULL || (newnode && newnode->parent == n)) return;
-    nuiN_childrenevents(NUI_remove_child, n);
+    nuiN_childrenevents(n->S, NUI_remove_child, n);
     if (newnode && newnode->parent)
-        nuiN_childrenevents(NUI_remove_child, newnode->parent);
+        nuiN_childrenevents(n->S, NUI_remove_child, newnode->parent);
     nuiN_cleanchildren(n);
     if (newnode == NULL) return;
     if (newnode->parent == NULL)
@@ -1292,7 +1293,7 @@ NUI_API void nui_setchildren(NUInode *n, NUInode *newnode) {
         i->parent = n;
         ++n->child_count;
     }
-    nuiN_childrenevents(NUI_add_child, n);
+    nuiN_childrenevents(n->S, NUI_add_child, n);
 }
 
 NUI_API void nui_append(NUInode *n, NUInode *newnode) {

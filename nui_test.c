@@ -97,6 +97,21 @@ static int add_listener(NUIstate *S) {
     return 1;
 }
 
+static int tracked_node = 0;
+
+static void track_node_delete(void *ud, NUInode *n, NUIevent *evt) {
+    printf("node: %p deleted\n", n);
+    --tracked_node;
+}
+
+static NUInode *new_track_node(NUIstate *S) {
+    NUInode *n = nui_newnode(S);
+    nui_addhandler(n, NUI_(delete_node), 0, track_node_delete, NULL);
+    printf("new node: %p\n", n);
+    ++tracked_node;
+    return n;
+}
+
 static void test_mem(void) {
     NUIparams params = { debug_alloc };
     NUIstate *S = nui_newstate(&params);
@@ -109,9 +124,8 @@ static void test_mem(void) {
     printf("new key: %p\n", name);
     printf("new key: %p\n", NUI_(observer));
 
-    NUInode *n = nui_newnode(S); /* a pending node */
-    n = nui_newnode(S);
-    printf("new node: %p\n", n);
+    NUInode *n = new_track_node(S); /* a pending node */
+    n = new_track_node(S);
 
     NUIevent *ev = nui_newevent(S, NUI_(test), 1, 1);
     nui_settable(S, nui_eventdata(ev), NUI_(foo))->value = nui_strdata(S, "bar");
@@ -131,21 +145,22 @@ static void test_mem(void) {
     NUItype *t = nui_newtype(S, NUI_(observer), 0, sizeof(NUIcomp_name));
     printf("new type: %p\n", t);
 
-    NUInode *n1 = nui_newnode(S);
+    NUInode *n1 = new_track_node(S);
     nui_setparent(n1, nui_rootnode(S));
     NUIcomp *comp1 = nui_addcomp(n1, t);
-    printf("new node with type: %p\n1", n1);
+    printf("new node with comp: %p\n", comp1);
 
     NUIcomp *comp = nui_getcomp(n1, t);
     assert(comp == comp1);
     assert(comp == nui_addcomp(n1, t));
 
-    NUInode *n2 = nui_newnode(S);
+    NUInode *n2 = new_track_node(S);
     nui_setparent(n2, n1);
     comp = nui_addcomp(n2, t);
     assert(comp == nui_getcomp(n2, t));
 
     nui_close(S);
+    assert(tracked_node == 0);
 }
 
 static void test_node(void) {
