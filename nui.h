@@ -73,7 +73,7 @@ typedef unsigned NUItime;
 /* callbacks */
 
 typedef NUItime NUItimerf   (void *ud, NUItimer *timer, NUItime elapsed);
-typedef void    NUIhandlerf (void *ud, NUInode *node, NUIevent *event);
+typedef void    NUIhandlerf (void *ud, NUInode *node, const NUIevent *event);
 
 
 /* nui global routines */
@@ -92,24 +92,25 @@ NUI_API int  nui_loop       (NUIstate *S);
 /* nui node routines */
 
 NUI_API NUInode  *nui_newnode (NUIstate *S);
-NUI_API NUIstate *nui_state   (NUInode *n);
 
 NUI_API int nui_retain  (NUInode *n);
 NUI_API int nui_release (NUInode *n);
 
-NUI_API NUInode *nui_parent      (NUInode *n);
-NUI_API NUInode *nui_prevchild   (NUInode *n, NUInode *curr);
-NUI_API NUInode *nui_nextchild   (NUInode *n, NUInode *curr);
-NUI_API NUInode *nui_prevsibling (NUInode *n, NUInode *curr);
-NUI_API NUInode *nui_nextsibling (NUInode *n, NUInode *curr);
+NUI_API NUIstate *nui_state (const NUInode *n);
 
-NUI_API NUInode *nui_root     (NUInode *n);
-NUI_API NUInode *nui_prevleaf (NUInode *n, NUInode *curr);
-NUI_API NUInode *nui_nextleaf (NUInode *n, NUInode *curr);
+NUI_API NUInode *nui_parent      (const NUInode *n);
+NUI_API NUInode *nui_prevchild   (const NUInode *n, const NUInode *curr);
+NUI_API NUInode *nui_nextchild   (const NUInode *n, const NUInode *curr);
+NUI_API NUInode *nui_prevsibling (const NUInode *n, const NUInode *curr);
+NUI_API NUInode *nui_nextsibling (const NUInode *n, const NUInode *curr);
 
-NUI_API NUInode *nui_indexnode  (NUInode *n, int idx);
-NUI_API int      nui_nodeindex  (NUInode *n);
-NUI_API int      nui_childcount (NUInode *n);
+NUI_API NUInode *nui_root     (const NUInode *n);
+NUI_API NUInode *nui_prevleaf (const NUInode *n, const NUInode *curr);
+NUI_API NUInode *nui_nextleaf (const NUInode *n, const NUInode *curr);
+
+NUI_API NUInode *nui_indexnode  (const NUInode *n, int idx);
+NUI_API int      nui_nodeindex  (const NUInode *n);
+NUI_API int      nui_childcount (const NUInode *n);
 
 NUI_API void nui_setparent   (NUInode *n, NUInode *parent);
 NUI_API void nui_setchildren (NUInode *n, NUInode *children);
@@ -126,8 +127,8 @@ NUI_API NUIattr *nui_setattr (NUInode *n, NUIkey *key, NUIattr *attr);
 NUI_API NUIattr *nui_getattr (NUInode *n, NUIkey *key);
 NUI_API NUIattr *nui_delattr (NUInode *n, NUIkey *key);
 
-NUI_API NUIattr *nui_adddefattr (NUInode *n, NUIattr *attr);
-NUI_API NUIattr *nui_deldefattr (NUInode *n, NUIattr *attr);
+NUI_API NUIattr *nui_addattrhandler (NUInode *n, NUIattr *attr);
+NUI_API NUIattr *nui_delattrhandler (NUInode *n, NUIattr *attr);
 
 NUI_API int      nui_set (NUInode *n, NUIkey *key, const char *v);
 NUI_API NUIdata *nui_get (NUInode *n, NUIkey *key);
@@ -138,13 +139,14 @@ NUI_API NUIdata *nui_get (NUInode *n, NUIkey *key);
 NUI_API NUIevent *nui_newevent (NUIstate *S, NUIkey *type, int bubbles, int cancelable);
 NUI_API void      nui_delevent (NUIevent *evt);
 
-NUI_API NUIkey   *nui_eventtype (NUIevent *evt);
-NUI_API NUInode  *nui_eventnode (NUIevent *evt);
-NUI_API NUItable *nui_eventdata (NUIevent *evt);
-NUI_API NUItime   nui_eventtime (NUIevent *evt);
+NUI_API NUIkey   *nui_eventtype (const NUIevent *evt);
+NUI_API NUItable *nui_eventdata (const NUIevent *evt);
+NUI_API NUInode  *nui_eventnode (const NUIevent *evt);
+NUI_API NUItime   nui_eventtime (const NUIevent *evt);
+NUI_API NUIstate *nui_eventstate (const NUIevent *evt);
 
-NUI_API int nui_eventstatus (NUIevent *evt, int status);
-enum NUIeventstatus { NUI_BUBBLES = 1, NUI_CANCELABLE, NUI_STOPED, NUI_CANCELLED, NUI_PHASE };
+NUI_API int nui_eventstatus (const NUIevent *evt, int status);
+enum NUIeventstatus { NUI_BUBBLES = 1, NUI_CANCELABLE, NUI_STOPPED, NUI_CANCELED, NUI_PHASE };
 enum NUIeventphase  { NUI_CAPTURE = 1, NUI_TARGET, NUI_BUBBLE };
 
 NUI_API void nui_stopevent   (NUIevent *evt, int stopnow);
@@ -180,7 +182,8 @@ NUI_API void nui_canceltimer (NUItimer *t);
 
 /* nui memory routines */
 
-#define NUI_(s) (nui_newkey((S), #s, sizeof(#s)-1))
+#define NUI_KEY(S, s) (nui_newkey((S), #s, sizeof(#s)-1))
+#define NUI_(s)     NUI_KEY(S, s)
 
 NUI_API void  nui_initpool (NUIpool *pool, size_t objsize);
 NUI_API void  nui_freepool (NUIstate *S, NUIpool *pool);
@@ -206,9 +209,10 @@ NUI_API void nui_freetable (NUIstate *S, NUItable *t);
 
 NUI_API size_t    nui_resizetable (NUIstate *S, NUItable *t, size_t len);
 NUI_API NUIentry *nui_settable    (NUIstate *S, NUItable *t, NUIkey *key);
-NUI_API NUIentry *nui_gettable    (NUItable *t, NUIkey *key);
 
-NUI_API int nui_nextentry (NUItable *t, NUIentry **e);
+NUI_API const NUIentry *nui_gettable (const NUItable *t, NUIkey *key);
+
+NUI_API int nui_nextentry (const NUItable *t, NUIentry **e);
 
 
 /* struct fields */
@@ -283,7 +287,7 @@ NUI_NS_END
 #define NUI_MIN_STRTABLE_SIZE         32
 #define NUI_HASHLIMIT                 5
 #define NUI_MIN_HASHSIZE              4
-#define NUI_MAX_EVENTLEVEL            3000
+#define NUI_MAX_EVENTLEVEL            100
 
 #define NUI_MIN_ESIZE                 (sizeof(NUIentry)*NUI_MIN_HASHSIZE)
 #define NUI_SMALLSIZE                 (NUI_MIN_ESIZE > 64 ? NUI_MIN_ESIZE : 64)
@@ -704,8 +708,8 @@ NUI_API size_t nui_resizetable(NUIstate *S, NUItable *t, size_t len) {
     return t->size;
 }
 
-NUI_API NUIentry *nui_gettable(NUItable *t, NUIkey *key) {
-    NUIentry *e;
+NUI_API const NUIentry *nui_gettable(const NUItable *t, NUIkey *key) {
+    const NUIentry *e;
     if (t->size == 0 || key == NULL) return NULL;
     assert((t->size & (t->size - 1)) == 0);
     e = &t->hash[nui_lmod(nuiS_hash(key), t->size)];
@@ -721,12 +725,12 @@ NUI_API NUIentry *nui_gettable(NUItable *t, NUIkey *key) {
 NUI_API NUIentry *nui_settable(NUIstate *S, NUItable *t, NUIkey *key) {
     NUIentry *ret;
     if (key == NULL) return NULL;
-    if ((ret = nui_gettable(t, key)) != NULL)
+    if ((ret = (NUIentry*)nui_gettable(t, key)) != NULL)
         return ret;
     return nuiH_newkey(S, t, key);
 }
 
-NUI_API int nui_nextentry (NUItable *t, NUIentry **pentry) {
+NUI_API int nui_nextentry(const NUItable *t, NUIentry **pentry) {
     size_t i = *pentry ? *pentry - &t->hash[0] + 1 : 0;
     for (; i < t->size; ++i) {
         NUIentry *e = &t->hash[i];
@@ -740,10 +744,11 @@ NUI_API int nui_nextentry (NUItable *t, NUIentry **pentry) {
 
 /* nui event handlers */
 
-NUI_API NUIkey *nui_eventtype(NUIevent *evt) { return evt->type; }
-NUI_API NUInode *nui_eventnode(NUIevent *evt) { return evt->node; }
-NUI_API NUItable *nui_eventdata(NUIevent *evt) { return &evt->data; }
-NUI_API NUItime nui_eventtime(NUIevent *evt) { return evt->emit_time; }
+NUI_API NUIkey *nui_eventtype(const NUIevent *evt) { return evt->type; }
+NUI_API NUItable *nui_eventdata(const NUIevent *evt) { return (NUItable*)&evt->data; }
+NUI_API NUInode *nui_eventnode(const NUIevent *evt) { return evt->node; }
+NUI_API NUItime nui_eventtime(const NUIevent *evt) { return evt->emit_time; }
+NUI_API NUIstate *nui_eventstate(const NUIevent *evt) { return evt->S; }
 
 NUI_API void nui_cancelevent(NUIevent *evt)
 { if (evt->cancelable) evt->canceled = 1; }
@@ -752,7 +757,7 @@ NUI_API void nui_stopevent(NUIevent *evt, int stopnow)
 { evt->stopnow = stopnow ? 1 : 0; evt->stopped = 1; }
 
 static void nuiE_dodefault(NUInode *n, NUIevent *evt) {
-    NUIentry *e = nui_gettable(&n->handlers, evt->type);
+    const NUIentry *e = nui_gettable(&n->handlers, evt->type);
     NUIhandlers *hs;
     if (e == NULL || (hs = (NUIhandlers*)e->value) == NULL)
         return;
@@ -777,7 +782,7 @@ static void nuiE_sweepdead(NUIstate *S, NUIhandlers *hs) {
 }
 
 static void nuiE_doevent(NUInode *n, NUIevent *evt, int capture) {
-    NUIentry *e = nui_gettable(&n->handlers, evt->type);
+    const NUIentry *e = nui_gettable(&n->handlers, evt->type);
     NUIhandlers *hs, *p;
     int havedead = 0;
     if (e == NULL ||
@@ -866,12 +871,12 @@ NUI_API void nui_delevent(NUIevent *evt) {
     nui_pfree(&S->eventpool, evt);
 }
 
-NUI_API int nui_eventstatus(NUIevent *evt, int status) {
+NUI_API int nui_eventstatus(const NUIevent *evt, int status) {
     switch (status) {
     case NUI_BUBBLES: return evt->bubbles;
     case NUI_CANCELABLE: return evt->cancelable;
-    case NUI_STOPED: return evt->stopped;
-    case NUI_CANCELLED: return evt->canceled;
+    case NUI_STOPPED: return evt->stopped;
+    case NUI_CANCELED: return evt->canceled;
     case NUI_PHASE: return evt->phase;
     default: return -1;
     }
@@ -908,7 +913,7 @@ NUI_API void nui_addhandler(NUInode *n, NUIkey *type, int capture, NUIhandlerf *
 }
 
 NUI_API void nui_delhandler(NUInode *n, NUIkey *type, int capture, NUIhandlerf *h, void *ud) {
-    NUIentry *e = nui_gettable(&n->handlers, type);
+    const NUIentry *e = nui_gettable(&n->handlers, type);
     NUIhandlers **pp, *hs = (NUIhandlers*)e->value;
     pp = &hs->next; /* skip default handler */
     while (*pp != NULL) {
@@ -952,22 +957,22 @@ NUI_API NUIattr *nui_setattr(NUInode *n, NUIkey *key, NUIattr *attr) {
 }
 
 NUI_API NUIattr *nui_getattr(NUInode *n, NUIkey *key) {
-    NUIentry *e = nui_gettable(&n->attrs, key);
+    const NUIentry *e = nui_gettable(&n->attrs, key);
     return e ? (NUIattr*)e->value : NULL;
 }
 
 NUI_API NUIattr *nui_delattr(NUInode *n, NUIkey *name) {
-    NUIentry *e = nui_gettable(&n->attrs, name);
+    const NUIentry *e = nui_gettable(&n->attrs, name);
     NUIattr *attr;
     if (e == NULL) return NULL;
     attr = (NUIattr*)e->value;
     if (attr->del_attr != NULL)
         attr->del_attr(attr, n);
-    e->value = NULL;
+    ((NUIentry*)e)->value = NULL;
     return attr;
 }
 
-NUI_API NUIattr *nui_adddefattr(NUInode *n, NUIattr *attr) {
+NUI_API NUIattr *nui_addattrhandler(NUInode *n, NUIattr *attr) {
     NUIhandlers *hs = (NUIhandlers*)nui_palloc(n->S, &n->S->handlerpool);
     memset(hs, 0, sizeof(*hs));
     hs->next = n->attrhandlers;
@@ -975,7 +980,7 @@ NUI_API NUIattr *nui_adddefattr(NUInode *n, NUIattr *attr) {
     return attr;
 }
 
-NUI_API NUIattr *nui_deldefattr(NUInode *n, NUIattr *attr) {
+NUI_API NUIattr *nui_delattrhandler(NUInode *n, NUIattr *attr) {
     NUIhandlers **pp = &n->attrhandlers;
     while (*pp != NULL) {
         if ((*pp)->u.attr != attr)
@@ -1062,7 +1067,7 @@ NUI_API NUItype *nui_newtype(NUIstate *S, NUIkey *name, size_t size, size_t csiz
 }
 
 NUI_API NUItype *nui_gettype(NUIstate *S, NUIkey *name) {
-    NUIentry *e = nui_gettable(&S->types, name);
+    const NUIentry *e = nui_gettable(&S->types, name);
     return e ? (NUItype*)e->value : NULL;
 }
 
@@ -1090,7 +1095,7 @@ NUI_API NUIcomp *nui_addcomp(NUInode *n, NUItype *t) {
 }
 
 NUI_API NUIcomp *nui_getcomp(NUInode *n, NUItype *t) {
-    NUIentry *e = nui_gettable(&n->comps, t->name);
+    const NUIentry *e = nui_gettable(&n->comps, t->name);
     return e ? (NUIcomp*)e->value : NULL;
 }
 
@@ -1124,12 +1129,12 @@ static void nuiC_clear(NUInode *n) {
 
 /* nui node */
 
-NUI_API NUIstate *nui_state(NUInode *n) { return n ? n->S : NULL; }
+NUI_API NUIstate *nui_state(const NUInode *n) { return n ? n->S : NULL; }
 
 NUI_API int nui_retain(NUInode *n) { return ++n->ref; } 
-NUI_API int nui_childcount(NUInode *n) { return n->child_count; }
+NUI_API int nui_childcount(const NUInode *n) { return n->child_count; }
 
-NUI_API NUInode* nui_parent(NUInode *n)
+NUI_API NUInode* nui_parent(const NUInode *n)
 { return n && n->parent ? n->parent : NULL; }
 
 static void nuiN_insert(NUInode *h, NUInode *n) {
@@ -1339,58 +1344,58 @@ NUI_API int nui_detach(NUInode *n) {
     return n->ref;
 }
 
-NUI_API NUInode *nui_prevchild(NUInode *n, NUInode *curr) {
+NUI_API NUInode *nui_prevchild(const NUInode *n, const NUInode *curr) {
     if (n == NULL || n->children == NULL)
         return NULL;
     return nui_prevsibling(n->children, curr);
 }
 
-NUI_API NUInode *nui_nextchild(NUInode *n, NUInode *curr) {
+NUI_API NUInode *nui_nextchild(const NUInode *n, const NUInode *curr) {
     if (n == NULL || n->children == NULL)
         return NULL;
     return nui_nextsibling(n->children, curr);
 }
 
-NUI_API NUInode* nui_prevsibling(NUInode *n, NUInode *curr) {
+NUI_API NUInode* nui_prevsibling(const NUInode *n, const NUInode *curr) {
     if (curr == n) return NULL;
     if (curr == NULL) curr = n;
     return curr->prev_sibling;
 }
 
-NUI_API NUInode* nui_nextsibling(NUInode *n, NUInode *curr) {
-    if (curr == NULL) return n;
+NUI_API NUInode* nui_nextsibling(const NUInode *n, const NUInode *curr) {
+    if (curr == NULL) return (NUInode*)n;
     curr = curr->next_sibling;
-    return curr == n ? NULL : curr;
+    return curr == n ? NULL : (NUInode*)curr;
 }
 
-NUI_API NUInode* nui_root(NUInode *n) {
+NUI_API NUInode* nui_root(const NUInode *n) {
     NUInode *parent;
     if (n == NULL) return NULL;
     while ((parent = n->parent) != NULL)
         n = parent;
-    return n;
+    return (NUInode*)n;
 }
 
-NUI_API NUInode* nui_prevleaf(NUInode *n, NUInode *curr) {
-    NUInode *parent, *firstchild;
+NUI_API NUInode* nui_prevleaf(const NUInode *n, const NUInode *curr) {
+    const NUInode *parent, *firstchild;
     if (curr == n) return NULL; /* end of iteration */
     if (curr == NULL) curr = n; /* first of iteration */
     if (curr != n) {
         /* return parent if curr is the first child of parent. */
         if ((parent = curr->parent) != NULL && parent->children == curr)
-            return parent;
+            return (NUInode*)parent;
         /* if curr is not top, set curr to the preious sibling */
         if (parent) curr = curr->prev_sibling;
     }
     /* and get it's last leaf */
     while ((firstchild = curr->children) != NULL)
         curr = firstchild->prev_sibling;
-    return curr;
+    return (NUInode*)curr;
 }
 
-NUI_API NUInode* nui_nextleaf(NUInode *n, NUInode *curr) {
+NUI_API NUInode* nui_nextleaf(const NUInode *n, const NUInode *curr) {
     NUInode *parent = NULL;
-    if (curr == NULL) return n;
+    if (curr == NULL) return (NUInode*)n;
     /* if curr has children, return the first one */
     if (curr->children != NULL)
         return curr->children;
@@ -1404,7 +1409,7 @@ NUI_API NUInode* nui_nextleaf(NUInode *n, NUInode *curr) {
     return curr->next_sibling;
 }
 
-NUI_API NUInode *nui_indexnode(NUInode *n, int idx) {
+NUI_API NUInode *nui_indexnode(const NUInode *n, int idx) {
     NUInode *i, *children = n->children;
     if (children == NULL
             || (idx >= 0 &&  idx > n->child_count)
@@ -1426,7 +1431,7 @@ NUI_API NUInode *nui_indexnode(NUInode *n, int idx) {
     return NULL;
 }
 
-NUI_API int nui_nodeindex(NUInode *n) {
+NUI_API int nui_nodeindex(const NUInode *n) {
     int idx = 0;
     NUInode *i, *children;
     if (n == NULL || n->parent == NULL)
@@ -1710,7 +1715,7 @@ NUI_API int nui_waitevents(NUIstate *S) {
     if (nuiT_hastimers(S)) {
         NUItime current = nui_time(S);
         nuiT_updatetimers(S, current);
-        if ((ret = S->params->wait(S->params, nuiT_gettimeout(S, current))) != 0)
+        if ((ret = S->params->wait(S->params, nuiT_gettimeout(S, current))) < 0)
             return ret;
     }
     return nui_pollevents(S);

@@ -63,9 +63,9 @@ static NUInode *new_named_node(NUIstate *S, const char *name) {
     return n;
 }
 
-static void add_child(void *ud, NUInode *n, NUIevent *evt) {
+static void add_child(void *ud, NUInode *n, const NUIevent *evt) {
     NUIstate *S = nui_state(n);
-    NUIentry *e = nui_gettable(nui_eventdata(evt), NUI_(child));
+    const NUIentry *e = nui_gettable(nui_eventdata(evt), NUI_(child));
     printf("add_child:\t");
     putname(nui_eventnode(evt));
     printf(" <- ");
@@ -73,9 +73,9 @@ static void add_child(void *ud, NUInode *n, NUIevent *evt) {
     printf("\n");
 }
 
-static void remove_child(void *ud, NUInode *n, NUIevent *evt) {
+static void remove_child(void *ud, NUInode *n, const NUIevent *evt) {
     NUIstate *S = nui_state(n);
-    NUIentry *e = nui_gettable(nui_eventdata(evt), NUI_(child));
+    const NUIentry *e = nui_gettable(nui_eventdata(evt), NUI_(child));
     printf("remove_child:\t");
     putname(nui_eventnode(evt));
     printf(" <- ");
@@ -83,7 +83,7 @@ static void remove_child(void *ud, NUInode *n, NUIevent *evt) {
     printf("\n");
 }
 
-static void delete_node(void *ud, NUInode *n, NUIevent *evt) {
+static void delete_node(void *ud, NUInode *n, const NUIevent *evt) {
     printf("delete:\t\t"); putname(nui_eventnode(evt)); printf("\n");
 }
 
@@ -99,7 +99,7 @@ static int add_listener(NUIstate *S) {
 
 static int tracked_node = 0;
 
-static void track_node_delete(void *ud, NUInode *n, NUIevent *evt) {
+static void track_node_delete(void *ud, NUInode *n, const NUIevent *evt) {
     printf("node: %p deleted\n", n);
     --tracked_node;
 }
@@ -213,6 +213,68 @@ static void test_node(void) {
     nui_close(S);
 }
 
+static void on_foo(void *ud, NUInode *n, const NUIevent *evt) {
+    NUIstate *S = nui_state(n);
+    NUIevent *new_evt = nui_newevent(S, NUI_(foo), 0, 0);
+    nui_emitevent(n, new_evt); /* should loop */
+    nui_delevent(new_evt);
+}
+
+static void on_remove_child(void *ud, NUInode *n, const NUIevent *evt) {
+    NUIstate *S = nui_state(n);
+    NUInode *child = (NUInode*)nui_gettable(nui_eventdata(evt), NUI_(child))->value;
+    nui_detach(child); /* trigger new event, should loop */
+}
+
+static void report_eventpool(NUIstate *S) {
+    /* this function use nui internal state!! */
+    NUIpool *eventpool = &S->eventpool;
+    const size_t offset = NUI_POOLSIZE - sizeof(void*);
+    const size_t perpage = (NUI_POOLSIZE - sizeof(void*)) / sizeof(NUIevent);
+    size_t allcount = 0;
+    size_t freecount = 0;
+    void *pages = eventpool->pages;
+    while (pages != NULL) {
+        allcount += perpage;
+        pages = *(void**)((char*)pages + offset);
+    }
+    void *freed = eventpool->freed;
+    while (freed) {
+        ++freecount;
+        freed = *(void**)freed;
+    }
+    printf("eventpool: %d/%d (%d per page)\n",
+            (int)freecount, (int)allcount, (int)perpage);
+}
+
+static void test_event(void) {
+    NUIparams params = { debug_alloc };
+    NUIstate *S = nui_newstate(&params);
+    nui_addhandler(nui_rootnode(S), NUI_(foo), 0, on_foo, NULL);
+    printf("trigger loop event\n");
+    on_foo(NULL, nui_rootnode(S), NULL); /* emit first event */
+    printf("over: ");
+    report_eventpool(S);
+
+    nui_addhandler(nui_rootnode(S), NUI_(remove_child), 0, on_remove_child, NULL);
+
+    NUInode *n1 = nui_newnode(S);
+    nui_setparent(n1, nui_rootnode(S));
+
+    NUInode *n2 = nui_newnode(S);
+    nui_setparent(n2, nui_rootnode(S));
+
+    /* trigger event
+     * event should loop maximum (100), and doesn't do anything */
+    printf("trigger loop event by changing node\n");
+    nui_setparent(n1, n2);
+    printf("over: ");
+    report_eventpool(S);
+    assert(nui_parent(n1) == n2); /* event handler should have no effect */
+
+    nui_close(S);
+}
+
 static NUItime on_timer(void *ud, NUItimer *t, NUItime elapsed) {
     printf("on_timer: %p: %u\n", t, elapsed);
     return ud ? 1000 : 0;
@@ -234,6 +296,7 @@ static void test_timer(void) {
 int main(void) {
     test_mem();
     test_node();
+    test_event();
     test_timer();
     return 0;
 }
