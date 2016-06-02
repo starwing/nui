@@ -660,27 +660,27 @@ LB_API int lbind_hasfield(lua_State *L, int idx, const char *field) {
 }
 
 LB_API int lbind_self(lua_State *L, const void *p, const char *method, int nargs, int *ptraceback) {
+  int top = lua_gettop(L);
   luaL_checkstack(L, nargs+3, "too many arguments to self call");
-  if (!lbind_retrieve(L, p)) return 0; /* 1 */
-  if (lua53_getfield(L, -1, method) == LUA_TNIL) { /* 2 */
-    lua_pop(L, 2);
-    return 0;
-  }
+  if (!lbind_retrieve(L, p) ||
+      lua53_getuservalue(L, -1) == LUA_TNIL ||
+      lua53_getfield(L, -1, method) == LUA_TNIL)
+  { lua_settop(L, top); return 0; }
+  lua_remove(L, -2);
   if (ptraceback) {
     lua_pushcfunction(L, lbL_traceback);
     lua_insert(L, -3);
-    *ptraceback = lua_gettop(L) - 3;
+    *ptraceback = top;
   }
   lua_insert(L, -2);
-  /* stack: traceback method object */
-  return 1;
+  /* stack: traceback? method object */
+  return ptraceback ? 3 : 2;
 }
 
 LB_API int lbind_pcall(lua_State *L, int nargs, int nrets) {
-  int res, tb_idx;
+  int res, tb_idx = lua_gettop(L)-nargs;
   lua_pushcfunction(L, lbL_traceback);
-  lua_insert(L, -nargs-2);
-  tb_idx = lua_gettop(L)-nargs-1;
+  lua_insert(L, tb_idx);
   res = lua_pcall(L, nargs, nrets, tb_idx);
   lua_remove(L, tb_idx);
   return res;
@@ -778,10 +778,10 @@ static int lbL_index(lua_State *L) {
     if (lua53_rawget(L, -2) != LUA_TNIL)
       return 1;
   }
-  if (!lua_isnone(L, lua_upvalueindex(1)) &&
+  if (!lua_isnoneornil(L, lua_upvalueindex(1)) &&
       (nret = lbM_calllut(L, lua_upvalueindex(1), 2)) >= 0)
     return nret;
-  if (!lua_isnone(L, lua_upvalueindex(2)) &&
+  if (!lua_isnoneornil(L, lua_upvalueindex(2)) &&
       (nret = lbM_callacc(L, lua_upvalueindex(2), 2)) >= 0)
     return nret;
   /* find in libtable/superlibtable */

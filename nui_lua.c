@@ -1,6 +1,6 @@
 #define LUA_LIB
 #define LBIND_STATIC_API
-#define LBIND_DEFAULT_FLAG (LBIND_TRACK|LBIND_ACCESSOR)
+#define LBIND_DEFAULT_FLAG (LBIND_TRACK|LBIND_INTERN|LBIND_ACCESSOR)
 #include "lbind.h"
 
 #define NUI_IMPLEMENTATION
@@ -16,17 +16,13 @@ LBIND_TYPE(lbT_Type,  "nui.Type");
 
 /* utils */
 
+static void ln_unref(lua_State *L, int *ref)
+{ luaL_unref(L, LUA_REGISTRYINDEX, *ref); *ref = LUA_NOREF; }
+
 static void ln_ref(lua_State *L, int idx, int *ref) {
     lua_pushvalue(L, idx);
-    if (*ref == LUA_NOREF)
-        *ref = luaL_ref(L, LUA_REGISTRYINDEX);
-    else
-        lua_rawseti(L, LUA_REGISTRYINDEX, *ref);
-}
-
-static void ln_unref(lua_State *L, int *ref) {
-    luaL_unref(L, LUA_REGISTRYINDEX, *ref);
-    *ref = LUA_NOREF;
+    if (*ref <= 0) *ref = luaL_ref(L, LUA_REGISTRYINDEX);
+    else lua_rawseti(L, LUA_REGISTRYINDEX, *ref);
 }
 
 static int ln_pushnode(lua_State *L, NUInode *n) {
@@ -52,7 +48,8 @@ static NUIkey *ln_tokey(NUIstate *S, lua_State *L, int idx) {
 /* global state for Lua */
 
 #define LNUI_LUA_KEYS(X) \
-    X(LuaState) X(target) X(child) X(parent) X(node)
+    X(LuaState) X(target) X(child) X(parent) X(node) \
+    X(delete_node)
 
 enum LNUIluakeys {
 #define X(str) LNUI_##str,
@@ -65,7 +62,9 @@ typedef struct LNUIlua {
     NUItype base;
     lua_State *L;
     NUIstate *S;
-    int objtable;
+    int handlers;
+    int objects;
+    NUIpool attrpool;
     NUIkey *keys[LNUI_KEY_MAX];
 } LNUIlua;
 
@@ -78,13 +77,24 @@ typedef struct LNUIstate {
     int     (*default_wait) (NUIparams *S, NUItime time);
 } LNUIstate;
 
-static NUIstate *ln_checkstate(lua_State *L, int idx) {
-    LNUIstate *LS = (LNUIstate*)lbind_check(L, idx, &lbT_State);
-    return LS->params.S;
-}
+typedef struct LNUIattr {
+    NUIattr base;
+    LNUIlua *ls;
+    int used_count;
+    int ref;
+    int setattr_ref;
+    int getattr_ref;
+    int delattr_ref;
+} LNUIattr;
 
-static void ln_closestate(LNUIlua *ls) {
-    LNUIlua **pls;
+static NUIstate *ln_checkstate(lua_State *L, int idx)
+{ return ((LNUIstate*)lbind_check(L, idx, &lbT_State))->params.S; }
+
+static LNUIlua *ln_statefromS(NUIstate *S)
+{ return (LNUIlua*)nui_gettype(S, NUI_(LuaState)); }
+
+static void ln_closelua(NUItype *t, NUIstate *S) {
+    LNUIlua **pls, *ls = (LNUIlua*)t;
     lua_State *L = ls->L;
     int i;
     if (L == NULL) return;
@@ -94,58 +104,87 @@ static void ln_closestate(LNUIlua *ls) {
     lua_pop(L, 1);
     lua_pushnil(L);
     lua_rawsetp(L, LUA_REGISTRYINDEX, ls);
-    ln_unref(L, &ls->objtable);
+    lua_rawgeti(L, LUA_REGISTRYINDEX, ls->objects);
+    lua_pushnil(L); /* clear objects table */
+    while (lua_next(L, -2)) {
+        void *p = lua_touserdata(L, -2);
+        lua_CFunction f = lua_tocfunction(L, -1);
+        if (f) f(L);
+        if (!lbind_retrieve(L, p)) { lua_pop(L, 1); continue; }
+        lbind_delete(L, -1);
+        lua_pop(L, 2);
+    }
+    ln_unref(L, &ls->objects);
+    ln_unref(L, &ls->handlers);
+    nui_freepool(S, &ls->attrpool);
     for (i = 0; i < LNUI_KEY_MAX; ++i)
-        nui_delkey(ls->S, ls->keys[i]);
+        nui_delkey(S, ls->keys[i]);
     ls->L = NULL;
 }
 
-static int ln_closestatefromL(lua_State *L) {
+static int ln_closeluafromL(lua_State *L) {
     LNUIlua **pls = (LNUIlua**)lua_touserdata(L, 1);
-    printf("ln_closestatefromL\n");
-    if (pls && *pls) ln_closestate(*pls);
+    if (pls && *pls) ln_closelua(&(*pls)->base, (*pls)->S);
     return 0;
 }
 
-static void ln_closestatefromS(NUItype *t, NUIstate *S) {
-    printf("ln_closestatefromS\n");
-    ln_closestate((LNUIlua*)t);
+static void ln_nodedeletor(NUItype *t, NUInode *n, NUIcomp *comp) {
+    LNUIlua *ls = (LNUIlua*)t;
+    lua_State *L = ls->L;
+    if (L == NULL) return;
+    if (lbind_retrieve(L, n)) {
+        lbind_delete(L, -1);
+        lua_pop(L, 1);
+    }
 }
 
-static LNUIlua *ln_statefromL(lua_State *L, NUIstate *S) {
-    LNUIlua *t;
+static LNUIlua *ln_newlua(lua_State *L, NUIstate *S) {
+    LNUIlua *ls;
     NUIkey *key = NUI_(LuaState);
     lua_rawgetp(L, LUA_REGISTRYINDEX, S);
-    t = (LNUIlua*)lua_touserdata(L, -1);
+    ls = (LNUIlua*)lua_touserdata(L, -1);
     lua_pop(L, 1);
-    if (t != NULL) return t;
-    t = (LNUIlua*)nui_newtype(S, key, sizeof(LNUIlua), 0);
-    if (t == NULL) { /* already have a state? */
-        t = (LNUIlua*)nui_gettype(S, key);
-        if (t->L != NULL) luaL_error(L, "already have a LuaState(%p) "
-                "bind with this NUIstate(%p)", t->L, S);
+    if (ls != NULL) return ls;
+    ls = (LNUIlua*)nui_newtype(S, key, sizeof(LNUIlua), 0);
+    if (ls == NULL) { /* already have a state? */
+        ls = (LNUIlua*)nui_gettype(S, key);
+        if (ls->L != NULL) luaL_error(L, "already have a LuaState(%p) "
+                "bind with this NUIstate(%p)", ls->L, S);
     }
-    t->L = L;
-    t->S = S;
-    t->base.close = ln_closestatefromS;
-    *(LNUIlua**)lua_newuserdata(L, sizeof(LNUIlua*)) = t;
-    lua_pushcfunction(L, ln_closestatefromL);
+    ls->L = L;
+    ls->S = S;
+    ls->base.del_comp = ln_nodedeletor;
+    ls->base.close = ln_closelua;
+    *(LNUIlua**)lua_newuserdata(L, sizeof(LNUIlua*)) = ls;
+    lua_pushcfunction(L, ln_closeluafromL);
     lbind_setmetafield(L, -2, "__gc");
-    lua_rawsetp(L, LUA_REGISTRYINDEX, t);
-    lua_newtable(L);
-    t->objtable = luaL_ref(L, LUA_REGISTRYINDEX);
-#define X(str) t->keys[LNUI_##str] = nui_usekey(NUI_(str));
+    lua_rawsetp(L, LUA_REGISTRYINDEX, ls);
+    lua_newtable(L); ls->objects = luaL_ref(L, LUA_REGISTRYINDEX);
+    lua_newtable(L); ls->handlers = luaL_ref(L, LUA_REGISTRYINDEX);
+    nui_initpool(&ls->attrpool, sizeof(LNUIattr));
+#define X(str) ls->keys[LNUI_##str] = nui_usekey(NUI_(str));
     LNUI_LUA_KEYS(X)
 #undef  X
-    lua_pushlightuserdata(L, t);
+    lua_pushlightuserdata(L, ls);
     lua_rawsetp(L, LUA_REGISTRYINDEX, S);
-    return t;
+    return ls;
 }
 
-static LNUIlua *ln_statefromS(NUIstate *S) {
-    LNUIlua *t = (LNUIlua*)nui_gettype(S, NUI_(LuaState));
-    assert(t != NULL);
-    return t;
+static void ln_refobject(LNUIlua *ls, void *p, lua_CFunction deletor) {
+    lua_State *L = ls->L;
+    lua_rawgeti(L, LUA_REGISTRYINDEX, ls->objects);
+    if (deletor) lua_pushcfunction(L, deletor);
+    else lua_pushboolean(L, 1);
+    lua_rawsetp(L, -2, p);
+    lua_pop(L, 1);
+}
+
+static void ln_unrefobject(LNUIlua *ls, void *p) {
+    lua_State *L = ls->L;
+    lua_rawgeti(L, LUA_REGISTRYINDEX, ls->objects);
+    lua_pushnil(L);
+    lua_rawsetp(L, -2, p);
+    lua_pop(L, 1);
 }
 
 
@@ -153,78 +192,78 @@ static LNUIlua *ln_statefromS(NUIstate *S) {
 
 typedef struct LNUItimer {
     NUItimer *timer;
-    lua_State *L;
-    int ontimer_ref;
+    LNUIlua *ls;
     int ref;
+    int ontimer_ref;
     unsigned delayms;
 } LNUItimer;
 
-static NUItime lnui_ontimer(void *ud, NUItimer *timer, NUItime elapsed) {
-    LNUItimer *obj = (LNUItimer*)ud;
-    lua_State *L = obj->L;
-    lua_rawgeti(L, LUA_REGISTRYINDEX, obj->ontimer_ref);
-    lua_rawgeti(L, LUA_REGISTRYINDEX, obj->ref);
+static NUItime ln_ontimer(void *ud, NUItimer *timer, NUItime elapsed) {
+    LNUItimer *lt = (LNUItimer*)ud;
+    lua_State *L = lt->ls->L;
+    lua_rawgeti(L, LUA_REGISTRYINDEX, lt->ontimer_ref);
+    lua_rawgeti(L, LUA_REGISTRYINDEX, lt->ref);
     lua_pushinteger(L, (lua_Integer)elapsed);
     if (lbind_pcall(L, 2, 1) != LUA_OK) {
         fprintf(stderr, "%s\n", lua_tostring(L, -1));
-        ln_unref(L, &obj->ref);
+        ln_unref(L, &lt->ref);
     }
     else if (lua_isnumber(L, -1)) {
         lua_Integer ret = lua_tointeger(L, -1);
         return ret >= 0 ? (NUItime)ret : 0;
     }
     else if (lua_toboolean(L, -1))
-        nui_starttimer(timer, obj->delayms);
+        nui_starttimer(timer, lt->delayms);
     else
-        ln_unref(L, &obj->ref);
+        ln_unref(L, &lt->ref);
     lua_pop(L, 1);
     return 0;
 }
 
 static int Ltimer_new(lua_State *L) {
     NUIstate *S = ln_checkstate(L, 1);
-    LNUItimer *obj;
+    LNUIlua *ls = ln_statefromS(S);
+    LNUItimer *lt;
     luaL_checktype(L, 2, LUA_TFUNCTION);
-    obj = (LNUItimer*)lbind_new(L, sizeof(LNUItimer), &lbT_Timer);
-    obj->timer = nui_newtimer(S, lnui_ontimer, obj);
-    obj->L = L;
-    obj->ontimer_ref = LUA_NOREF;
-    obj->ref = LUA_NOREF;
-    if (obj->timer != NULL) {
-        ln_ref(L, 2, &obj->ontimer_ref);
-        return 1;
-    }
-    return 0;
+    lt = (LNUItimer*)lbind_new(L, sizeof(LNUItimer), &lbT_Timer);
+    lt->timer = nui_newtimer(S, ln_ontimer, lt);
+    lt->ls = ls;
+    lt->ontimer_ref = LUA_NOREF;
+    lt->ref = LUA_NOREF;
+    ln_ref(L, 2, &lt->ontimer_ref);
+    ln_refobject(ln_statefromS(S), lt, NULL);
+    return 1;
 }
 
 static int Ltimer_delete(lua_State *L) {
-    LNUItimer *obj = (LNUItimer*)lbind_test(L, 1, &lbT_Timer);
-    if (obj->timer != NULL) {
-        nui_deltimer(obj->timer);
+    LNUItimer *lt = (LNUItimer*)lbind_test(L, 1, &lbT_Timer);
+    if (lt && lt->timer != NULL) {
+        ln_unrefobject(lt->ls, lt);
+        nui_deltimer(lt->timer);
         lbind_delete(L, 1);
-        ln_unref(L, &obj->ontimer_ref);
-        ln_unref(L, &obj->ref);
-        obj->timer = NULL;
+        ln_unref(L, &lt->ontimer_ref);
+        ln_unref(L, &lt->ref);
+        lt->timer = NULL;
     }
     return 0;
 }
 
 static int Ltimer_start(lua_State *L) {
-    LNUItimer *obj = (LNUItimer*)lbind_check(L, 1, &lbT_Timer);
+    LNUItimer *lt = (LNUItimer*)lbind_check(L, 1, &lbT_Timer);
     lua_Integer delayms = luaL_optinteger(L, 2, 0);
-    if (!obj->timer) return 0;
+    if (!lt->timer) return 0;
     if (delayms < 0) delayms = 0;
-    obj->delayms = (unsigned)delayms;
-    if (nui_starttimer(obj->timer, obj->delayms))
-        ln_ref(L, 1, &obj->ref);
+    lt->delayms = (unsigned)delayms;
+    if (nui_starttimer(lt->timer, lt->delayms))
+        ln_ref(L, 1, &lt->ref);
     lbind_returnself(L);
 }
 
 static int Ltimer_cancel(lua_State *L) {
-    LNUItimer *obj = (LNUItimer*)lbind_check(L, 1, &lbT_Timer);
-    if (!obj->timer) return 0;
-    ln_unref(L, &obj->ref);
-    nui_canceltimer(obj->timer);
+    LNUItimer *lt = (LNUItimer*)lbind_check(L, 1, &lbT_Timer);
+    if (!lt->timer) return 0;
+    ln_unref(L, &lt->ref);
+    nui_canceltimer(lt->timer);
     lbind_returnself(L);
 }
 
@@ -248,30 +287,93 @@ static void open_timer(lua_State *L) {
 
 typedef struct LNUItype {
     NUItype base;
+    LNUIlua *ls;
     lua_State *L;
 } LNUItype;
 
-static int ln_newcomp(NUItype *t, NUInode *n, NUIcomp *comp) { return 0; }
-static void ln_delcomp(NUItype *t, NUInode *n, NUIcomp *comp) { }
-static void ln_closetype(NUItype *t, NUIstate *S) { }
+typedef struct LNUIcomp {
+    NUIcomp base;
+    int ref;
+} LNUIcomp;
+
+static int ln_newcomp(NUItype *t, NUInode *n, NUIcomp *comp) {
+    LNUIcomp *lc = (LNUIcomp*)comp;
+    lua_State *L = ((LNUItype*)t)->L;
+    int ret = 0;
+    if (L == NULL) return 0;
+    if (lbind_self(L, t, "newcomp", 1, NULL)) {
+        if (!ln_pushnode(L, n)) lua_pushnil(L);
+        if (lbind_pcall(L, 2, 1) != LUA_OK)
+            fprintf(stderr, "%s\n", lua_tostring(L, -1));
+        else if (lua_toboolean(L, -1)) {
+            ln_ref(L, -1, &lc->ref);
+            ret = 1;
+        }
+        lua_pop(L, 1);
+    }
+    return ret;
+}
+
+static void ln_delcomp(NUItype *t, NUInode *n, NUIcomp *comp) {
+    LNUIcomp *lc = (LNUIcomp*)comp;
+    lua_State *L = ((LNUItype*)t)->L;
+    if (L == NULL) return;
+    if (lbind_self(L, t, "delcomp", 2, NULL)) {
+        if (!ln_pushnode(L, n)) lua_pushnil(L);
+        lua_rawseti(L, LUA_REGISTRYINDEX, lc->ref);
+        if (lbind_pcall(L, 3, 0) != LUA_OK) {
+            fprintf(stderr, "%s\n", lua_tostring(L, -1));
+            lua_pop(L, 1);
+        }
+    }
+}
+
+static void ln_closetype(NUItype *t, NUIstate *S) {
+    lua_State *L = ((LNUItype*)t)->L;
+    if (L == NULL) return;
+    if (lbind_self(L, t, "close", 0, NULL)
+            && lbind_pcall(L, 1, 0) != LUA_OK) {
+        fprintf(stderr, "%s\n", lua_tostring(L, -1));
+        lua_pop(L, 1);
+    }
+}
+
+static int ln_typedeletor(lua_State *L) {
+    LNUItype *t = (LNUItype*)lua_touserdata(L, -2);
+    t->base.new_comp = NULL;
+    t->L = NULL;
+    return 0;
+}
 
 static int Ltype_new(lua_State *L) {
     NUIstate *S = ln_checkstate(L, 1);
+    LNUIlua *ls = ln_statefromS(S);
     NUIkey *key = ln_checkkey(S, L, 2);
-    LNUItype *type = (LNUItype*)nui_newtype(S, key, sizeof(LNUItype), 0);
-    type->base.new_comp = ln_newcomp;
-    type->base.del_comp = ln_delcomp;
-    type->base.close    = ln_closetype;
-    lbind_wrap(L, type, &lbT_Type);
+    LNUItype *t = (LNUItype*)nui_newtype(S, key, sizeof(LNUItype), sizeof(LNUIcomp));
+    t->ls = ls;
+    t->L = L;
+    t->base.new_comp = ln_newcomp;
+    t->base.del_comp = ln_delcomp;
+    t->base.close    = ln_closetype;
+    ln_refobject(ls, t, ln_typedeletor);
+    lbind_wrap(L, t, &lbT_Type);
     return 1;
 }
 
-static int Ltype_delete(lua_State *L) { return 0; }
+static int Ltype_delete(lua_State *L) {
+    LNUItype *t = (LNUItype*)lbind_test(L, 1, &lbT_Type);
+    if (t) {
+        ln_unrefobject(t->ls, t);
+        lbind_delete(L, 1);
+        t->base.new_comp = NULL;
+        t->L = NULL;
+    }
+    return 0;
+}
 
 static int Ltype_setenv(lua_State *L) {
-    LNUItype *t = (LNUItype*)lbind_check(L, 1, &lbT_Type);
+    lbind_check(L, 1, &lbT_Type);
     luaL_checktype(L, 2, LUA_TTABLE);
-    /* XXX */
     lua_setuservalue(L, 1);
     lbind_returnself(L);
 }
@@ -321,37 +423,13 @@ static void open_type(lua_State *L) {
 }
 
 
-/* node attributes */
+/* attributes */
 
-typedef struct LNUIattr {
-    NUIattr base;
-    LNUIlua *ls;
-    int refcount;
-    int setattr_ref;
-    int getattr_ref;
-    int delattr_ref;
-} LNUIattr;
+static void ln_refattr(lua_State *L, LNUIattr *lattr, int idx)
+{ if (lattr->used_count++ <= 0) ln_ref(L, idx, &lattr->ref); }
 
-static void ln_retainattr(LNUIattr *lattr) {
-    LNUIlua *ls = lattr->ls;
-    lua_State *L = ls->L;
-    if (lattr->refcount++ <= 0) {
-        lua_rawgeti(L, LUA_REGISTRYINDEX, ls->objtable);
-        lua_pushvalue(L, -2);
-        lua_rawsetp(L, -2, lattr);
-    }
-}
-
-static void ln_releaseattr(LNUIattr *lattr) {
-    LNUIlua *ls = lattr->ls;
-    lua_State *L = ls->L;
-    if (--lattr->refcount <= 0) {
-        lua_rawgeti(L, LUA_REGISTRYINDEX, ls->objtable);
-        lua_pushnil(L);
-        lua_rawsetp(L, -2, lattr);
-        lua_pop(L, 1);
-    }
-}
+static void ln_unrefattr(lua_State *L, LNUIattr *lattr)
+{ if (--lattr->used_count <= 0) ln_unref(L, &lattr->ref); }
 
 static NUIdata *ln_getattr(NUIattr *attr, NUInode *node, NUIkey *key) {
     LNUIattr *lattr = (LNUIattr*)attr;
@@ -400,17 +478,35 @@ static void ln_delattr(NUIattr *attr, NUInode *node) {
         fprintf(stderr, "%s\n", lua_tostring(L, -1));
         lua_pop(L, 1);
     }
-    ln_releaseattr(lattr);
+    ln_unrefattr(L, lattr);
     return;
 }
 
+static void ln_freeattr(lua_State *L, LNUIattr *lattr) {
+    assert(lattr->used_count == 0);
+    ln_unrefobject(lattr->ls, lattr);
+    ln_unref(L, &lattr->getattr_ref);
+    ln_unref(L, &lattr->setattr_ref);
+    ln_unref(L, &lattr->delattr_ref);
+    lattr->base.get_attr = NULL;
+    lattr->base.set_attr = NULL;
+    lattr->base.del_attr = NULL;
+    nui_pfree(&lattr->ls->attrpool, lattr);
+}
+
+static int ln_attrdeletor(lua_State *L) {
+    ln_freeattr(L, (LNUIattr*)lua_touserdata(L, -2));
+    return 0;
+}
+
 static LNUIattr *ln_newattr(lua_State *L, NUIstate *S, int idx) {
-    LNUIattr *lattr;
+    LNUIlua *ls = ln_statefromS(S);
+    LNUIattr *lattr = (LNUIattr*)nui_palloc(S, &ls->attrpool);
     int type, top = idx;
+    assert(idx > 0);
     lua_settop(L, idx+3);
-    lattr = lbind_new(L, sizeof(LNUIattr), &lbT_Attr);
     memset(lattr, 0, sizeof(*lattr));
-    lattr->ls = ln_statefromL(L, S);
+    lattr->ls = ls;
     if ((type = lua_type(L, idx++)) != LUA_TNIL) {
         if (type != LUA_TFUNCTION) goto not_func;
         lua_pushvalue(L, 3);
@@ -429,8 +525,9 @@ static LNUIattr *ln_newattr(lua_State *L, NUIstate *S, int idx) {
         lattr->delattr_ref = luaL_ref(L, LUA_REGISTRYINDEX);
         lattr->base.del_attr = ln_delattr;
     }
-    lua_insert(L, top);
     lua_settop(L, top);
+    lbind_wrap(L, lattr, &lbT_Attr);
+    ln_refobject(ls, lattr, ln_attrdeletor);
     return lattr;
 
 not_func:
@@ -440,18 +537,15 @@ not_func:
 }
 
 static int Lattr_new(lua_State *L) {
-    NUIstate *S = ln_checkstate(L, 1);
-    ln_newattr(L, S, 2);
+    ln_newattr(L, ln_checkstate(L, 1), 2);
     return 1;
 }
 
 static int Lattr_delete(lua_State *L) {
     LNUIattr *lattr = (LNUIattr*)lbind_test(L, 1, &lbT_Attr);
-    if (lattr && lattr->refcount <= 0) {
+    if (lattr && lattr->used_count <= 0) {
+        ln_freeattr(L, lattr);
         lbind_delete(L, 1);
-        ln_unref(L, &lattr->getattr_ref);
-        ln_unref(L, &lattr->setattr_ref);
-        ln_unref(L, &lattr->delattr_ref);
     }
     return 0;
 }
@@ -491,25 +585,23 @@ static int Lattr_delattr(lua_State *L) {
 
 static int Lnode_setattr(lua_State *L) {
     NUInode *n = (NUInode*)lbind_check(L, 1, &lbT_Node);
-    LNUIlua *ls = ln_statefromL(L, nui_state(n));
+    LNUIlua *ls = ln_statefromS(nui_state(n));
     NUIkey *key = ln_checkkey(nui_state(n), L, 2);
     LNUIattr *lattr = (LNUIattr*)lbind_test(L, 3, &lbT_Attr);
     lua_settop(L, 3);
     if (!lattr) lattr = ln_newattr(L, ls->S, 3);
     if (!nui_setattr(n, key, &lattr->base)) return 0;
-    ln_retainattr(lattr);
+    ln_refattr(L, lattr, 3);
     return 1;
 }
 
 static int Lnode_getattr(lua_State *L) {
     NUInode *n = (NUInode*)lbind_check(L, 1, &lbT_Node);
-    LNUIlua *ls = ln_statefromL(L, nui_state(n));
     NUIkey *key = ln_checkkey(nui_state(n), L, 2);
     LNUIattr *lattr = (LNUIattr*)nui_getattr(n, key);
     if (lattr == NULL) return 0;
-    lua_rawgeti(L, LUA_REGISTRYINDEX, ls->objtable);
-    if (lua53_rawgetp(L, -1, lattr) != LUA_TUSERDATA)
-        luaL_argerror(L, 2, "atribute not created from lua");
+    if (!lbind_retrieve(L, lattr))
+        lua_pushlightuserdata(L, lattr);
     return 1;
 }
 
@@ -527,7 +619,7 @@ static int Lnode_addattrhandler(lua_State *L) {
     NUInode *n = (NUInode*)lbind_check(L, 1, &lbT_Node);
     LNUIattr *lattr = (LNUIattr*)lbind_check(L, 2, &lbT_Attr);
     nui_addattrhandler(n, &lattr->base);
-    ln_retainattr(lattr);
+    ln_refattr(L, lattr, 2);
     lbind_returnself(L);
 }
 
@@ -535,7 +627,7 @@ static int Lnode_delattrhandler(lua_State *L) {
     NUInode *n = (NUInode*)lbind_check(L, 1, &lbT_Node);
     LNUIattr *lattr = (LNUIattr*)lbind_check(L, 2, &lbT_Attr);
     if (!nui_delattrhandler(n, &lattr->base)) return 0;
-    ln_releaseattr(lattr);
+    ln_unrefattr(L, lattr);
     lbind_returnself(L);
 }
 
@@ -583,15 +675,17 @@ static int Levent_new(lua_State *L) {
     NUIkey *key = ln_checkkey(S, L, 2);
     int bubbles = lua_toboolean(L, 3);
     int cancelable = lua_toboolean(L, 4);
-    NUIevent *e = nui_newevent(S, key, bubbles, cancelable);
-    lbind_wrap(L, e, &lbT_Event);
+    NUIevent *evt = nui_newevent(S, key, bubbles, cancelable);
+    ln_refobject(ln_statefromS(S), evt, NULL);
+    lbind_wrap(L, evt, &lbT_Event);
     return 1;
 }
 
 static int Levent_delete(lua_State *L) {
-    NUIevent *e = (NUIevent*)lbind_test(L, 1, &lbT_Event);
-    if (e != NULL) {
-        nui_delevent(e);
+    NUIevent *evt = (NUIevent*)lbind_test(L, 1, &lbT_Event);
+    if (evt != NULL) {
+        ln_unrefobject(ln_statefromS(nui_eventstate(evt)), evt);
+        nui_delevent(evt);
         lbind_delete(L, 1);
     }
     return 0;
@@ -601,7 +695,7 @@ static int Levent_hashf(lua_State *L) {
     NUIevent *evt = lbind_check(L, 1, &lbT_Event);
     NUIstate *S = nui_eventstate(evt);
     NUIkey *key = ln_checkkey(S, L, 2);
-    LNUIlua *ls = ln_statefromL(L, S);
+    LNUIlua *ls = ln_statefromS(S);
     const NUIentry *e = nui_gettable(nui_eventdata(evt), key);
     if (e == NULL) return 0;
     int i, isnode = 0;
@@ -706,7 +800,7 @@ static void ln_eventhandler(void *ud, NUInode *n, const NUIevent *evt) {
     lua_State *L = ls->L;
     if (!lbind_retrieve(L, n)) return;
     if (lua53_getuservalue(L, -1) == LUA_TTABLE) {
-        lua_rawgeti(L, LUA_REGISTRYINDEX, ls->objtable);
+        lua_rawgeti(L, LUA_REGISTRYINDEX, ls->handlers);
         if (lua53_rawgetp(L, -1, ud) != LUA_TFUNCTION)
         { lua_pop(L, 4); return; }
         lua_pushvalue(L, -4);
@@ -724,12 +818,12 @@ static void ln_eventhandler(void *ud, NUInode *n, const NUIevent *evt) {
 
 static int Lnode_addhandler(lua_State *L) {
     NUInode *n = lbind_check(L, 1, &lbT_Node);
-    LNUIlua *ls = ln_statefromL(L, nui_state(n));
+    LNUIlua *ls = ln_statefromS(nui_state(n));
     NUIkey *type = ln_checkkey(nui_state(n), L, 2);
     void *ud = (void*)lua_topointer(L, 3);
     int capture = lua_toboolean(L, 4);
     luaL_checktype(L, 3, LUA_TFUNCTION);
-    lua_rawgeti(L, LUA_REGISTRYINDEX, ls->objtable);
+    lua_rawgeti(L, LUA_REGISTRYINDEX, ls->handlers);
     lua_pushvalue(L, 3);
     lua_rawsetp(L, -2, ud);
     nui_addhandler(n, type, capture, ln_eventhandler, ud);
@@ -739,12 +833,12 @@ static int Lnode_addhandler(lua_State *L) {
 
 static int Lnode_delhandler(lua_State *L) {
     NUInode *n = lbind_check(L, 1, &lbT_Node);
-    LNUIlua *ls = ln_statefromL(L, nui_state(n));
+    LNUIlua *ls = ln_statefromS(nui_state(n));
     NUIkey *type = ln_checkkey(nui_state(n), L, 2);
     void *ud = (void*)lua_topointer(L, 3);
     int capture = lua_toboolean(L, 4);
     luaL_checktype(L, 3, LUA_TFUNCTION);
-    lua_rawgeti(L, LUA_REGISTRYINDEX, ls->objtable);
+    lua_rawgeti(L, LUA_REGISTRYINDEX, ls->handlers);
     if (!ud || lua53_rawgetp(L, -2, ud) == LUA_TNIL)
         return 0;
     lua_pushnil(L);
@@ -805,8 +899,10 @@ static void ln_setparent(lua_State *L, NUInode *n, int nidx, int pidx) {
 
 static int Lnode_new(lua_State *L) {
     NUIstate *S = ln_checkstate(L, 1);
+    LNUIlua *ls = ln_statefromS(S);
     NUInode *n = nui_newnode(S);
     int i, top = lua_gettop(L);
+    nui_addcomp(n, &ls->base);
     for (i = 2; i <= top; ++i) {
         NUIkey *name = ln_checkkey(S, L, i);
         NUItype *t = nui_gettype(S, name);
@@ -819,10 +915,7 @@ static int Lnode_new(lua_State *L) {
 
 static int Lnode_delete(lua_State *L) {
     NUInode *n = (NUInode*)lbind_test(L, 1, &lbT_Node);
-    if (n) {
-        nui_release(n);
-        lbind_delete(L, 1);
-    }
+    if (n) nui_release(n);
     return 0;
 }
 
@@ -1106,7 +1199,7 @@ static int Lstate_new(lua_State *L) {
     LS->default_wait = LS->params.wait;
     LS->time_ref = LUA_NOREF;
     LS->wait_ref = LUA_NOREF;
-    LS->ls = ln_statefromL(L, LS->params.S);
+    LS->ls = ln_newlua(L, LS->params.S);
     return 1;
 }
 
@@ -1116,6 +1209,7 @@ static int Lstate_delete(lua_State *L) {
         ln_unref(L, &LS->time_ref);
         ln_unref(L, &LS->wait_ref);
         nui_close(LS->params.S);
+        lbind_delete(L, 1);
         assert(LS->params.S == NULL);
     }
     return 0;
