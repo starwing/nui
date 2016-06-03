@@ -509,10 +509,10 @@ NUI_API void nui_deldata(NUIstate *S, NUIdata *data) {
 #define nuiS_hash(key)   (nuiS_header(key)->hash)
 
 NUI_API NUIkey *nui_usekey(NUIkey *key)
-{ ++nuiS_header(key)->ref; return key; }
+{ if (key) ++nuiS_header(key)->ref; return key; }
 
 NUI_API size_t nui_keylen(NUIkey *key)
-{ return nui_len((NUIdata*)nuiS_header(key)) - sizeof(NUIkeyentry); }
+{ return !key ? 0 : nui_len((NUIdata*)nuiS_header(key)) - sizeof(NUIkeyentry); }
 
 static void nuiS_resize(NUIstate *S, size_t newsize) {
     NUIkeytable  oldstrt = S->strt;
@@ -549,6 +549,7 @@ static NUIkey *nuiS_new(NUIstate *S, const char *s, size_t len, unsigned h) {
     NUIkeyentry **list;  /* (pointer to) list where it will be inserted */
     NUIkeytable *kp = &S->strt;
     NUIkeyentry *o;
+    if (s == NULL || len == 0) return NULL;
     if (kp->nuse >= kp->size && kp->size <= NUI_MAX_SIZET/2)
         nuiS_resize(S, kp->size*2);  /* too crowded */
     list = &kp->hash[nui_lmod(h, kp->size)];
@@ -565,7 +566,7 @@ static NUIkey *nuiS_new(NUIstate *S, const char *s, size_t len, unsigned h) {
 
 static NUIkey *nuiS_get(NUIstate *S, const char *s, size_t len, unsigned h) {
     NUIkeyentry *o;
-    if (S->strt.hash == NULL) return NULL;
+    if (s == NULL || len == 0 || S->strt.hash == NULL) return NULL;
     for (o = S->strt.hash[nui_lmod(h, S->strt.size)];
          o != NULL;
          o = o->next) {
@@ -586,7 +587,7 @@ NUI_API NUIkey *nui_newkey(NUIstate *S, const char *s, size_t len) {
 NUI_API void nui_delkey(NUIstate *S, NUIkey *key) {
     NUIkeytable  *kp = &S->strt;
     NUIkeyentry **list, *h = nuiS_header(key);
-    if (--h->ref > 0) return;
+    if (key == NULL || --h->ref > 0) return;
     for (list = &kp->hash[nui_lmod(h->hash, kp->size)];
             *list != NULL && *list != h; list = &(*list)->next)
         ;
@@ -997,7 +998,7 @@ NUI_API NUIattr *nui_delattrhandler(NUInode *n, NUIattr *attr) {
 NUI_API int nui_set(NUInode *n, NUIkey *key, const char *v) {
     NUIattr *attr = nui_getattr(n, key);
     NUIhandlers *hs = n->attrhandlers;
-    if (attr->set_attr && attr->set_attr(attr, n, key, v))
+    if (attr && attr->set_attr && attr->set_attr(attr, n, key, v))
         return 1;
     while (hs != NULL) {
         attr = hs->u.attr;
@@ -1012,7 +1013,7 @@ NUI_API NUIdata *nui_get(NUInode *n, NUIkey *key) {
     NUIattr *attr = nui_getattr(n, key);
     NUIdata *ret = NULL;
     NUIhandlers *hs = n->attrhandlers;
-    if (attr->get_attr &&
+    if (attr && attr->get_attr &&
             (ret = attr->get_attr(attr, n, key)) != NULL)
         return ret;
     while (hs != NULL) {
