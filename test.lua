@@ -32,6 +32,7 @@ function test_node()
       n:addcomp(nameT)
       assert(n:getcomp(nameT))
       assert(n:getcomp(nameT) == n:getcomp "name")
+      assert(n:getcomp(nameT).name == name)
       n.parent = S.rootnode
       return n
    end
