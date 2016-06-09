@@ -39,16 +39,16 @@ function test_node()
    local function add_child(n, e)
       local parent = e.node and e.node.name or e.node
       local child = e.child and e.child.name or e.child
-      print("add_child:", parent, "<-", child)
+      print(("add_child: %s <- %s"):format(parent,  child))
    end
    local function remove_child(n, e)
       local parent = e.node and e.node.name or e.node
       local child = e.child and e.child.name or e.child
-      print("remove_child:", parent, "<-", child)
+      print(("remove_child: %s <- %s"):format(parent,  child))
    end
    local function delete_node(n, e)
       local target = e.node and e.node.name or e.node
-      print("delete_node:", target)
+      print("delete_node: "..tostring(target))
    end
    S.rootnode.name = "rootnode"
    S.rootnode:addhandler("add_child",  add_child, true)

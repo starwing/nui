@@ -64,6 +64,7 @@ typedef struct LNUIlua {
     NUIstate *S;
     int handlers;
     int objects;
+    int events;
     NUIpool attrpool;
     NUIkey *keys[LNUI_KEY_MAX];
 } LNUIlua;
@@ -86,6 +87,12 @@ typedef struct LNUIattr {
     int getattr_ref;
     int delattr_ref;
 } LNUIattr;
+
+typedef struct LNUIevent {
+    NUIevent *current;
+    NUIevent  evt;
+    LNUIlua  *ls;
+} LNUIevent;
 
 static NUIstate *ln_checkstate(lua_State *L, int idx)
 { return ((LNUIstate*)lbind_check(L, idx, &lbT_State))->params.S; }
@@ -119,8 +126,19 @@ static void ln_closelua(NUIparams *params) {
         lbind_delete(L, -1);
         lua_pop(L, 2);
     }
+    lua_rawgeti(L, LUA_REGISTRYINDEX, ls->events);
+    lua_pushnil(L); /* clear event table */
+    while (lua_next(L, -2)) {
+        LNUIevent *levt = (LNUIevent*)lbind_test(L, -1, &lbT_Event);
+        if (levt->current == &levt->evt)
+            nui_freeevent(levt->ls->S, levt->current);
+        levt->current = NULL;
+        lbind_delete(L, 1);
+        lua_pop(L, 1);
+    }
     ln_unref(L, &ls->objects);
     ln_unref(L, &ls->handlers);
+    ln_unref(L, &ls->events);
     nui_freepool(ls->S, &ls->attrpool);
     for (i = 0; i < LNUI_KEY_MAX; ++i)
         nui_delkey(ls->S, ls->keys[i]);
@@ -168,6 +186,9 @@ static LNUIlua *ln_newlua(lua_State *L, LNUIstate *LS) {
 #endif /* LNUI_delete_from_lua */
     lua_newtable(L); ls->objects = luaL_ref(L, LUA_REGISTRYINDEX);
     lua_newtable(L); ls->handlers = luaL_ref(L, LUA_REGISTRYINDEX);
+    lua_newtable(L); ls->events = luaL_ref(L, LUA_REGISTRYINDEX);
+    lua_pushstring(L, "v");
+    lbind_setmetafield(L, -2, "__mode");
     nui_initpool(&ls->attrpool, sizeof(LNUIattr));
 #define X(str) ls->keys[LNUI_##str] = nui_usekey(NUI_(str));
     LNUI_LUA_KEYS(X)
@@ -723,35 +744,78 @@ static void open_attr(lua_State *L) {
 
 /* events */
 
+static LNUIevent *ln_retrieve(lua_State *L, NUIstate *S, const NUIevent *evt) {
+    LNUIlua *ls = ln_statefromS(S);
+    LNUIevent *levt;
+    lua_rawgeti(L, LUA_REGISTRYINDEX, ls->events);
+    lua_rawgetp(L, -1, evt);
+    if ((levt = (LNUIevent*)lbind_object(L, -1)) == NULL)
+        lua_pop(L, 2);
+    else
+        lua_remove(L, -2);
+    return levt;
+}
+
+static NUIevent *ln_checkevent(lua_State *L, int idx) {
+    LNUIevent *levt = lbind_check(L, idx, &lbT_Event);
+    if (levt->current == NULL)
+        luaL_argerror(L, idx, "expired event object");
+    return levt->current;
+}
+
+static void ln_registerevent(lua_State *L, LNUIlua *ls, NUIevent *evt) {
+    lua_rawgeti(L, LUA_REGISTRYINDEX, ls->events);
+    lua_pushvalue(L, -2);
+    lua_rawsetp(L, -2, evt);
+    lua_pop(L, 1);
+}
+
+static int Levent_tostring(lua_State *L) {
+    LNUIevent *levt = lbind_test(L, 1, &lbT_Event);
+    if (levt == NULL) { lbind_tostring(L, 1); return 1; }
+    lua_pushfstring(L, "%s%s: %p",
+            lbT_Event.name,
+            levt->current == NULL ? "[N]" : "",
+            levt->current);
+    return 1;
+}
+
 static int Levent_new(lua_State *L) {
     NUIstate *S = ln_checkstate(L, 1);
+    LNUIlua *ls = ln_statefromS(S);
     NUIkey *key = ln_checkkey(S, L, 2);
     int bubbles = lua_toboolean(L, 3);
     int cancelable = lua_toboolean(L, 4);
-    NUIevent *evt = nui_newevent(S, key, bubbles, cancelable);
-    ln_refobject(ln_statefromS(S), evt, NULL);
-    lbind_wrap(L, evt, &lbT_Event);
+    LNUIevent *levt = (LNUIevent*)lbind_new(L, sizeof(LNUIevent), &lbT_Event);
+    nui_initevent(&levt->evt, key, bubbles, cancelable);
+    levt->current = &levt->evt;
+    levt->ls = ls;
+    ln_registerevent(L, ls, levt->current);
     return 1;
 }
 
 static int Levent_delete(lua_State *L) {
-    NUIevent *evt = (NUIevent*)lbind_test(L, 1, &lbT_Event);
-    if (evt != NULL) {
-        ln_unrefobject(ln_statefromS(nui_eventstate(evt)), evt);
-        nui_delevent(evt);
+    LNUIevent *levt = (LNUIevent*)lbind_test(L, 1, &lbT_Event);
+    if (levt != NULL) {
+        if (levt->current == &levt->evt)
+            nui_freeevent(levt->ls->S, levt->current);
         lbind_delete(L, 1);
+        levt->current = NULL;
     }
     return 0;
 }
 
 static int Levent_hashf(lua_State *L) {
-    NUIevent *evt = lbind_check(L, 1, &lbT_Event);
-    NUIstate *S = nui_eventstate(evt);
-    NUIkey *key = ln_checkkey(S, L, 2);
-    LNUIlua *ls = ln_statefromS(S);
-    const NUIentry *e = nui_gettable(nui_eventdata(evt), key);
-    if (e == NULL) return 0;
+    LNUIevent *levt = lbind_check(L, 1, &lbT_Event);
+    LNUIlua *ls = levt->ls;
+    NUIstate *S = ls->S;
+    const NUIentry *e;
     int i, isnode = 0;
+    NUIkey *key;
+    if (levt->current == NULL)
+        luaL_argerror(L, 1, "expired event object");
+    key = ln_checkkey(S, L, 2);
+    e = nui_gettable(nui_eventdata(levt->current), key);
     for (i = 1; i < LNUI_KEY_MAX; ++i)
         if (key == ls->keys[i]) { isnode = 1; break; }
     if (lua_gettop(L) == 2) {
@@ -770,56 +834,56 @@ static int Levent_hashf(lua_State *L) {
 }
 
 static int Levent_type(lua_State *L) {
-    NUIevent *evt = lbind_check(L, 1, &lbT_Event);
+    NUIevent *evt = ln_checkevent(L, 1);
     lbind_checkreadonly(L);
     lua_pushstring(L, (const char*)nui_eventtype(evt));
     return 1;
 }
 
 static int Levent_node(lua_State *L) {
-    NUIevent *evt = lbind_check(L, 1, &lbT_Event);
+    NUIevent *evt = ln_checkevent(L, 1);
     lbind_checkreadonly(L);
     ln_pushnode(L, nui_eventnode(evt));
     return 1;
 }
 
 static int Levent_time(lua_State *L) {
-    NUIevent *evt = lbind_check(L, 1, &lbT_Event);
+    NUIevent *evt = ln_checkevent(L, 1);
     lbind_checkreadonly(L);
     lua_pushinteger(L, nui_eventtime(evt));
     return 1;
 }
 
 static int Levent_bubbles(lua_State *L) {
-    NUIevent *evt = lbind_check(L, 1, &lbT_Event);
+    NUIevent *evt = ln_checkevent(L, 1);
     lbind_checkreadonly(L);
     lua_pushboolean(L, nui_eventstatus(evt, NUI_BUBBLES));
     return 1;
 }
 
 static int Levent_cancelable(lua_State *L) {
-    NUIevent *evt = lbind_check(L, 1, &lbT_Event);
+    NUIevent *evt = ln_checkevent(L, 1);
     lbind_checkreadonly(L);
     lua_pushboolean(L, nui_eventstatus(evt, NUI_CANCELABLE));
     return 1;
 }
 
 static int Levent_stopped(lua_State *L) {
-    NUIevent *evt = lbind_check(L, 1, &lbT_Event);
+    NUIevent *evt = ln_checkevent(L, 1);
     lbind_checkreadonly(L);
     lua_pushboolean(L, nui_eventstatus(evt, NUI_STOPPED));
     return 1;
 }
 
 static int Levent_canceled(lua_State *L) {
-    NUIevent *evt = lbind_check(L, 1, &lbT_Event);
+    NUIevent *evt = ln_checkevent(L, 1);
     lbind_checkreadonly(L);
     lua_pushboolean(L, nui_eventstatus(evt, NUI_CANCELED));
     return 1;
 }
 
 static int Levent_phase(lua_State *L) {
-    NUIevent *evt = lbind_check(L, 1, &lbT_Event);
+    NUIevent *evt = ln_checkevent(L, 1);
     const char *rets[] = { "none", "capture", "target", "bubble" };
     int retidx = nui_eventstatus(evt, NUI_PHASE);
     lbind_checkreadonly(L);
@@ -831,20 +895,20 @@ static int Levent_phase(lua_State *L) {
 }
 
 static int Levent_emit(lua_State *L) {
-    NUIevent *evt = lbind_check(L, 1, &lbT_Event);
+    NUIevent *evt = ln_checkevent(L, 1);
     NUInode *n = lbind_check(L, 2, &lbT_Node);
     lua_pushinteger(L, nui_emitevent(n, evt));
     return 1;
 }
 
 static int Levent_cancel(lua_State *L) {
-    NUIevent *evt = lbind_check(L, 1, &lbT_Event);
+    NUIevent *evt = ln_checkevent(L, 1);
     nui_cancelevent(evt);
     lbind_returnself(L);
 }
 
 static int Levent_stop(lua_State *L) {
-    NUIevent *evt = lbind_check(L, 1, &lbT_Event);
+    NUIevent *evt = ln_checkevent(L, 1);
     int stopnow = lua_toboolean(L, 2);
     nui_stopevent(evt, stopnow);
     lbind_returnself(L);
@@ -853,16 +917,20 @@ static int Levent_stop(lua_State *L) {
 static void ln_eventhandler(void *ud, NUInode *n, const NUIevent *evt) {
     NUIstate *S = nui_state(n);
     LNUIlua *ls = ln_statefromS(S);
+    LNUIevent *levt;
     lua_State *L = ls->L;
     if (L == NULL) return;
     lua_rawgeti(L, LUA_REGISTRYINDEX, ls->handlers);
     if (lua53_rawgetp(L, -1, ud) != LUA_TFUNCTION)
     { lua_pop(L, 2); return; }
     ln_pushnode(L, n);
-    if (!lbind_retrieve(L, evt)) {
-        lbind_wrap(L, (void*)evt, &lbT_Event);
-        ln_refobject(ls, (void*)evt, NULL);
+    if ((levt =ln_retrieve(L, S, evt)) == NULL) {
+        levt = lbind_new(L, sizeof(LNUIevent), &lbT_Event);
+        memset(levt, 0, sizeof(LNUIevent));
+        ln_registerevent(L, ls, (NUIevent*)evt);
+        levt->ls = ls;
     }
+    levt->current = (NUIevent*)evt;
     if (lbind_pcall(L, 2, 0) != LUA_OK) {
         fprintf(stderr, "%s\n", lua_tostring(L, -1));
         lua_pushboolean(L, 0);
@@ -870,6 +938,7 @@ static void ln_eventhandler(void *ud, NUInode *n, const NUIevent *evt) {
         lua_pop(L, 1);
     }
     lua_pop(L, 1);
+    if (evt != &levt->evt) levt->current = NULL;
 }
 
 static int Lnode_addhandler(lua_State *L) {
@@ -906,6 +975,7 @@ static int Lnode_delhandler(lua_State *L) {
 static void open_event(lua_State *L) {
     luaL_Reg libs[] = {
         { "__gc", Levent_delete },
+        { "__tostring", Levent_tostring },
 #define ENTRY(name) { #name, Levent_##name }
         ENTRY(new),
         ENTRY(delete),
@@ -982,7 +1052,7 @@ static int Lnode_setenv(lua_State *L) {
     int i;
     luaL_checktype(L, 2, LUA_TTABLE);
     nui_setchildren(n, NULL);
-    for (i = 1; lua53_rawgeti(L, 2, i) == LUA_TUSERDATA
+    for (i = 1; lua53_rawgeti(L, 2, i) != LUA_TNIL
             && (child = (NUInode*)lbind_test(L, -1, &lbT_Node)) != NULL; ++i) {
         nui_setparent(child, n);
         lua_rawsetp(L, 2, child);
@@ -1420,5 +1490,6 @@ LUALIB_API int luaopen_nui(lua_State *L) {
 
 /* win32cc: flags+='-mdll -s -O3 -DLUA_BUILD_AS_DLL'
  * win32cc: libs+='-llua53' output='nui.dll'
- * maccc: flags+='-bundle -O2 -undefined dynamic_lookup' output='nui.so' */
+ * maccc: flags+='-bundle -O2 -undefined dynamic_lookup' output='nui.so'
+ * cc: run='lua -- test.lua' */
 

@@ -136,31 +136,36 @@ NUI_API NUIdata *nui_get (NUInode *n, NUIkey *key);
 
 /* nui event handler */
 
-NUI_API NUIevent *nui_newevent (NUIstate *S, NUIkey *type, int bubbles, int cancelable);
-NUI_API void      nui_delevent (NUIevent *evt);
+NUI_API void nui_initevent (NUIevent *evt, NUIkey *type,
+                            int bubbles, int cancelable);
+NUI_API void nui_freeevent (NUIstate *S, NUIevent *evt);
 
-NUI_API NUIkey   *nui_eventtype (const NUIevent *evt);
-NUI_API NUItable *nui_eventdata (const NUIevent *evt);
-NUI_API NUInode  *nui_eventnode (const NUIevent *evt);
-NUI_API NUItime   nui_eventtime (const NUIevent *evt);
-NUI_API NUIstate *nui_eventstate (const NUIevent *evt);
+#define nui_eventtype(evt)  ((evt)->type)
+#define nui_eventdata(evt)  (&(evt)->data)
+#define nui_eventnode(evt)  ((NUInode*)(evt)->node)
+#define nui_eventtime(evt)  ((evt)->emit_time)
 
 NUI_API int nui_eventstatus (const NUIevent *evt, int status);
-enum NUIeventstatus { NUI_BUBBLES = 1, NUI_CANCELABLE, NUI_STOPPED, NUI_CANCELED, NUI_PHASE };
+enum NUIeventstatus { NUI_BUBBLES = 1,
+                      NUI_CANCELABLE, NUI_STOPPED, NUI_CANCELED, NUI_PHASE };
 enum NUIeventphase  { NUI_CAPTURE = 1, NUI_TARGET, NUI_BUBBLE };
 
-NUI_API void nui_stopevent   (NUIevent *evt, int stopnow);
-NUI_API void nui_cancelevent (NUIevent *evt);
+NUI_API void nui_stopevent   (const NUIevent *evt, int stopnow);
+NUI_API void nui_cancelevent (const NUIevent *evt);
 
 NUI_API int  nui_emitevent  (NUInode *n, NUIevent *evt);
-NUI_API void nui_defhandler (NUInode *n, NUIkey *type, NUIhandlerf *h, void *ud);
-NUI_API void nui_addhandler (NUInode *n, NUIkey *type, int capture, NUIhandlerf *h, void *ud);
-NUI_API void nui_delhandler (NUInode *n, NUIkey *type, int capture, NUIhandlerf *h, void *ud);
+NUI_API void nui_defhandler (NUInode *n, NUIkey *type,
+                             NUIhandlerf *h, void *ud);
+NUI_API void nui_addhandler (NUInode *n, NUIkey *type,
+                             int capture, NUIhandlerf *h, void *ud);
+NUI_API void nui_delhandler (NUInode *n, NUIkey *type,
+                             int capture, NUIhandlerf *h, void *ud);
 
 
 /* nui componemt routines */
 
-NUI_API NUItype *nui_newtype (NUIstate *S, NUIkey *name, size_t size, size_t csize);
+NUI_API NUItype *nui_newtype (NUIstate *S, NUIkey *name,
+                              size_t size, size_t csize);
 NUI_API NUItype *nui_gettype (NUIstate *S, NUIkey *name);
 
 NUI_API NUIcomp *nui_addcomp (NUInode *n, NUItype *t);
@@ -248,8 +253,22 @@ struct NUIparams {
 
 struct NUIattr {
     NUIdata *(*get_attr) (NUIattr *attr, NUInode *node, NUIkey *key);
-    int      (*set_attr) (NUIattr *attr, NUInode *node, NUIkey *key, const char *v);
+    int      (*set_attr) (NUIattr *attr, NUInode *node,
+                          NUIkey *key, const char *v);
     void     (*del_attr) (NUIattr *attr, NUInode *node);
+};
+
+struct NUIevent {
+    NUIkey   *type; /* all readonly except data */
+    NUInode  *node;
+    NUItime   emit_time;
+    unsigned  phase      : 4;
+    unsigned  bubbles    : 1;
+    unsigned  cancelable : 1;
+    unsigned  canceled   : 1;
+    unsigned  stopnow    : 1;
+    unsigned  stopped    : 1;
+    NUItable  data; /* mutable */
 };
 
 struct NUItype {
@@ -290,7 +309,7 @@ NUI_NS_END
 #define NUI_MAX_EVENTLEVEL            100
 
 #define NUI_MIN_ESIZE                 (sizeof(NUIentry)*NUI_MIN_HASHSIZE)
-#define NUI_SMALLSIZE                 (NUI_MIN_ESIZE > 64 ? NUI_MIN_ESIZE : 64)
+#define NUI_SMALLSIZE                 (NUI_MIN_ESIZE > 64 ? NUI_MIN_ESIZE:64)
 
 #define NUI_TIMER_NOINDEX  (~(unsigned)0)
 #define NUI_FOREVER        (~(NUItime)0)
@@ -344,20 +363,6 @@ struct NUIkeytable {
     unsigned seed;
 };
 
-struct NUIevent {
-    NUIkey   *type;
-    NUInode  *node;
-    NUIstate *S;
-    NUItime   emit_time;
-    unsigned  phase      : 4;
-    unsigned  bubbles    : 1;
-    unsigned  cancelable : 1;
-    unsigned  canceled   : 1;
-    unsigned  stopnow    : 1;
-    unsigned  stopped    : 1;
-    NUItable  data;
-};
-
 struct NUIhandlers {
     NUIhandlers *next;
     union {
@@ -392,7 +397,6 @@ struct NUIstate {
     NUIkeytable   strt;
     NUItable      types;
     NUItimerstate timers;
-    NUIpool       eventpool;
     NUIpool       handlerpool;
     NUIpool       nodepool;
     NUIpool       smallpool;
@@ -512,7 +516,7 @@ NUI_API NUIkey *nui_usekey(NUIkey *key)
 { if (key) ++nuiS_header(key)->ref; return key; }
 
 NUI_API size_t nui_keylen(NUIkey *key)
-{ return !key ? 0 : nui_len((NUIdata*)nuiS_header(key)) - sizeof(NUIkeyentry); }
+{ return !key ? 0:nui_len((NUIdata*)nuiS_header(key)) - sizeof(NUIkeyentry); }
 
 static void nuiS_resize(NUIstate *S, size_t newsize) {
     NUIkeytable  oldstrt = S->strt;
@@ -520,7 +524,8 @@ static void nuiS_resize(NUIstate *S, size_t newsize) {
     size_t i, realsize = NUI_MIN_STRTABLE_SIZE;
     while (realsize < NUI_MAX_SIZET/2/sizeof(NUIkey*) && realsize < newsize)
         realsize *= 2;
-    newstrt->hash = (NUIkeyentry**)nuiM_malloc(S, realsize*sizeof(NUIkeyentry*));
+    newstrt->hash = (NUIkeyentry**)nuiM_malloc(S,
+            realsize*sizeof(NUIkeyentry*));
     newstrt->size = realsize;
     for (i = 0; i < newstrt->size; ++i) newstrt->hash[i] = NULL;
     for (i = 0; i < oldstrt.size; ++i) {
@@ -745,17 +750,11 @@ NUI_API int nui_nextentry(const NUItable *t, NUIentry **pentry) {
 
 /* nui event handlers */
 
-NUI_API NUIkey *nui_eventtype(const NUIevent *evt) { return evt->type; }
-NUI_API NUItable *nui_eventdata(const NUIevent *evt) { return (NUItable*)&evt->data; }
-NUI_API NUInode *nui_eventnode(const NUIevent *evt) { return evt->node; }
-NUI_API NUItime nui_eventtime(const NUIevent *evt) { return evt->emit_time; }
-NUI_API NUIstate *nui_eventstate(const NUIevent *evt) { return evt->S; }
+NUI_API void nui_cancelevent(const NUIevent *evt)
+{ if (evt->cancelable) ((NUIevent*)evt)->canceled = 1; }
 
-NUI_API void nui_cancelevent(NUIevent *evt)
-{ if (evt->cancelable) evt->canceled = 1; }
-
-NUI_API void nui_stopevent(NUIevent *evt, int stopnow)
-{ evt->stopnow = stopnow ? 1 : 0; evt->stopped = 1; }
+NUI_API void nui_stopevent(const NUIevent *evt, int stopnow)
+{ ((NUIevent*)evt)->stopnow = stopnow ? 1:0; ((NUIevent*)evt)->stopped = 1; }
 
 static void nuiE_dodefault(NUInode *n, NUIevent *evt) {
     const NUIentry *e = nui_gettable(&n->handlers, evt->type);
@@ -855,21 +854,17 @@ NUI_API int nui_emitevent(NUInode *n, NUIevent *evt) {
     return !evt->canceled;
 }
 
-NUI_API NUIevent *nui_newevent(NUIstate *S, NUIkey *type, int bubbles, int cancelable) {
-    NUIevent *evt = (NUIevent*)nui_palloc(S, &S->eventpool);
+NUI_API void nui_initevent(NUIevent *evt, NUIkey *type, int bubbles, int cancelable) {
     memset(evt, 0, sizeof(*evt));
     evt->type = type;
-    evt->S = S;
     evt->bubbles    = bubbles    ? 1 : 0;
     evt->cancelable = cancelable ? 1 : 0;
     nui_usekey(type);
-    return evt;
 }
 
-NUI_API void nui_delevent(NUIevent *evt) {
-    NUIstate *S = evt->S;
+NUI_API void nui_freeevent(NUIstate *S, NUIevent *evt) {
+    nui_delkey(S, evt->type);
     nui_freetable(S, &evt->data);
-    nui_pfree(&S->eventpool, evt);
 }
 
 NUI_API int nui_eventstatus(const NUIevent *evt, int status) {
@@ -885,7 +880,7 @@ NUI_API int nui_eventstatus(const NUIevent *evt, int status) {
 
 NUI_API void nui_defhandler(NUInode *n, NUIkey *type, NUIhandlerf *h, void *ud) {
     NUIentry *e = nui_settable(n->S, &n->handlers, type);
-    NUIhandlers *hs = (NUIhandlers*)e->value;
+    NUIhandlers *hs = e ? (NUIhandlers*)e->value : NULL;
     if (hs == NULL) {
         hs = (NUIhandlers*)nui_palloc(n->S, &n->S->handlerpool);
         memset(hs, 0, sizeof(*hs));
@@ -897,9 +892,9 @@ NUI_API void nui_defhandler(NUInode *n, NUIkey *type, NUIhandlerf *h, void *ud) 
 
 NUI_API void nui_addhandler(NUInode *n, NUIkey *type, int capture, NUIhandlerf *h, void *ud) {
     NUIentry *e = nui_settable(n->S, &n->handlers, type);
-    NUIhandlers **pp, *hs = (NUIhandlers*)e->value;
-    if (h == NULL) return;
-    if (hs == NULL) {
+    NUIhandlers **pp, *hs;
+    if (h == NULL || e == NULL) return;
+    if ((hs = (NUIhandlers*)e->value) == NULL) {
         hs = (NUIhandlers*)nui_palloc(n->S, &n->S->handlerpool);
         memset(hs, 0, sizeof(*hs));
         e->value = hs;
@@ -953,8 +948,8 @@ void nuiE_clear(NUInode *n) {
 
 NUI_API NUIattr *nui_setattr(NUInode *n, NUIkey *key, NUIattr *attr) {
     NUIentry *e = nui_settable(n->S, &n->attrs, key);
-    if (!attr) {  nui_delattr(n, key); return NULL; }
-    return (NUIattr*)(e->value ? NULL : (e->value = attr));
+    if (!attr) { nui_delattr(n, key); return NULL; }
+    return (NUIattr*)(!e || e->value ? NULL : (e->value = attr));
 }
 
 NUI_API NUIattr *nui_getattr(NUInode *n, NUIkey *key) {
@@ -1053,7 +1048,7 @@ static void nuiA_clear(NUInode *n) {
 NUI_API NUItype *nui_newtype(NUIstate *S, NUIkey *name, size_t size, size_t csize) {
     NUIentry *e = nui_settable(S, &S->types, name);
     NUItype *t;
-    if (e->value != NULL) return NULL;
+    if (!e || e->value != NULL) return NULL;
     if (size  < sizeof(NUItype))  size = sizeof(NUItype);
     if (csize < sizeof(NUIcomp)) csize = sizeof(NUIcomp);
     t = (NUItype*)nuiM_malloc(S, size);
@@ -1077,6 +1072,7 @@ NUI_API NUIcomp *nui_addcomp(NUInode *n, NUItype *t) {
     NUItype **depends;
     NUIcomp *comp;
     size_t i, dlen;
+    if (e == NULL) return NULL;
     if (e->value) return (NUIcomp*)e->value;
     if (t->depends && (depends = t->depends(t, &dlen)) != NULL)
         for (i = 0; i < dlen; ++i)
@@ -1180,32 +1176,33 @@ static void nuiN_detach(NUInode *n) {
 
 static int nuiN_emitevent(int id, int cancelable, NUInode *n, NUInode *parent) {
     NUIstate *S = n->S;
-    NUIevent *evt = nui_newevent(S, S->builtins[id], 0, cancelable);
+    NUIevent evt;
     int ret = 0;
+    nui_initevent(&evt, S->builtins[id], 0, cancelable);
     if (id != NUI_add_child && id != NUI_remove_child)
-        ret = nui_emitevent(n, evt);
+        ret = nui_emitevent(n, &evt);
     else if (parent) {
         NUIkey *child = S->builtins[NUI_child];
-        nui_settable(S, &evt->data, child)->value = n;
-        ret = nui_emitevent(parent, evt);
+        nui_settable(S, &evt.data, child)->value = n;
+        ret = nui_emitevent(parent, &evt);
     }
-    nui_delevent(evt);
+    nui_freeevent(S, &evt);
     return ret;
 }
 
 static void nuiN_childrenevents(NUIstate *S, int id, NUInode *parent) {
     NUIkey *child = S->builtins[NUI_child];
     NUInode *i, *next;
-    NUIevent *evt;
+    NUIevent evt;
     assert(id == NUI_add_child || id == NUI_remove_child);
     if (parent == NULL || parent->children == NULL) return;
-    evt = nui_newevent(S, S->builtins[id], 0, 0);
+    nui_initevent(&evt, S->builtins[id], 0, 0);
     for (i = nui_nextchild(parent, NULL); i != NULL; i = next) {
         next = nui_nextchild(parent, i);
-        nui_settable(S, &evt->data, child)->value = i;
-        nui_emitevent(parent, evt);
+        nui_settable(S, &evt.data, child)->value = i;
+        nui_emitevent(parent, &evt);
     }
-    nui_delevent(evt);
+    nui_freeevent(S, &evt);
 }
 
 static void nuiN_cleanchildren(NUInode *n) {
@@ -1667,7 +1664,6 @@ NUI_API NUIstate *nui_newstate(NUIparams *params) {
     S->base.S = S;
     S->base.next_sibling = S->base.prev_sibling = &S->base;
     nui_initpool(&S->timers.pool, sizeof(NUItimer));
-    nui_initpool(&S->eventpool, sizeof(NUIevent));
     nui_initpool(&S->handlerpool, sizeof(NUIhandlers));
     nui_initpool(&S->nodepool, sizeof(NUInode));
     nui_initpool(&S->smallpool, NUI_SMALLSIZE);
@@ -1693,7 +1689,6 @@ NUI_API void nui_close(NUIstate *S) {
     nuiC_close(S);
     nuiT_cleartimers(S);
     nuiS_close(S);
-    nui_freepool(S, &S->eventpool);
     nui_freepool(S, &S->handlerpool);
     nui_freepool(S, &S->nodepool);
     nui_freepool(S, &S->smallpool);
@@ -1716,7 +1711,8 @@ NUI_API int nui_waitevents(NUIstate *S) {
     if (nuiT_hastimers(S)) {
         NUItime current = nui_time(S);
         nuiT_updatetimers(S, current);
-        if ((ret = S->params->wait(S->params, nuiT_gettimeout(S, current))) < 0)
+        if ((ret = S->params->wait(S->params,
+                        nuiT_gettimeout(S, current))) < 0)
             return ret;
     }
     return nui_pollevents(S);

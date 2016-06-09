@@ -127,12 +127,12 @@ static void test_mem(void) {
     NUInode *n = new_track_node(S); /* a pending node */
     n = new_track_node(S);
 
-    NUIevent *ev = nui_newevent(S, NUI_(test), 1, 1);
-    nui_settable(S, nui_eventdata(ev), NUI_(foo))->value = nui_strdata(S, "bar");
-    nui_emitevent(n, ev);
-    printf("new event: %p\n", ev);
-    nui_deldata(S, (NUIdata*)nui_gettable(nui_eventdata(ev), NUI_(foo))->value);
-    nui_delevent(ev);
+    NUIevent evt; nui_initevent(&evt, NUI_(test), 1, 1);
+    nui_settable(S, nui_eventdata(&evt), NUI_(foo))->value = nui_strdata(S, "bar");
+    nui_emitevent(n, &evt);
+    printf("new event: %p\n", &evt);
+    nui_deldata(S, (NUIdata*)nui_gettable(nui_eventdata(&evt), NUI_(foo))->value);
+    nui_freeevent(S, &evt);
 
     NUIattr attr = { NULL };
     nui_setattr(n, NUI_(attr), &attr);
@@ -215,9 +215,9 @@ static void test_node(void) {
 
 static void on_foo(void *ud, NUInode *n, const NUIevent *evt) {
     NUIstate *S = nui_state(n);
-    NUIevent *new_evt = nui_newevent(S, NUI_(foo), 0, 0);
-    nui_emitevent(n, new_evt); /* should loop */
-    nui_delevent(new_evt);
+    NUIevent new_evt; nui_initevent(&new_evt, NUI_(foo), 0, 0);
+    nui_emitevent(n, &new_evt); /* should loop */
+    nui_freeevent(S, &new_evt);
 }
 
 static void on_remove_child(void *ud, NUInode *n, const NUIevent *evt) {
@@ -226,35 +226,12 @@ static void on_remove_child(void *ud, NUInode *n, const NUIevent *evt) {
     nui_detach(child); /* trigger new event, should loop */
 }
 
-static void report_eventpool(NUIstate *S) {
-    /* this function use nui internal state!! */
-    NUIpool *eventpool = &S->eventpool;
-    const size_t offset = NUI_POOLSIZE - sizeof(void*);
-    const size_t perpage = (NUI_POOLSIZE - sizeof(void*)) / sizeof(NUIevent);
-    size_t allcount = 0;
-    size_t freecount = 0;
-    void *pages = eventpool->pages;
-    while (pages != NULL) {
-        allcount += perpage;
-        pages = *(void**)((char*)pages + offset);
-    }
-    void *freed = eventpool->freed;
-    while (freed) {
-        ++freecount;
-        freed = *(void**)freed;
-    }
-    printf("eventpool: %d/%d (%d per page)\n",
-            (int)freecount, (int)allcount, (int)perpage);
-}
-
 static void test_event(void) {
     NUIparams params = { debug_alloc };
     NUIstate *S = nui_newstate(&params);
     nui_addhandler(nui_rootnode(S), NUI_(foo), 0, on_foo, NULL);
     printf("trigger loop event\n");
     on_foo(NULL, nui_rootnode(S), NULL); /* emit first event */
-    printf("over: ");
-    report_eventpool(S);
 
     nui_addhandler(nui_rootnode(S), NUI_(remove_child), 0, on_remove_child, NULL);
 
@@ -268,8 +245,6 @@ static void test_event(void) {
      * event should loop maximum (100), and doesn't do anything */
     printf("trigger loop event by changing node\n");
     nui_setparent(n1, n2);
-    printf("over: ");
-    report_eventpool(S);
     assert(nui_parent(n1) == n2); /* event handler should have no effect */
 
     nui_close(S);
