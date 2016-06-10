@@ -1490,6 +1490,6 @@ LUALIB_API int luaopen_nui(lua_State *L) {
 
 /* win32cc: flags+='-mdll -s -O3 -DLUA_BUILD_AS_DLL'
  * win32cc: libs+='-llua53' output='nui.dll'
- * maccc: flags+='-bundle -O2 -undefined dynamic_lookup' output='nui.so'
+ * maccc: flags+='-bundle -ggdb -O0 -undefined dynamic_lookup' output='nui.so'
  * cc: run='lua -- test.lua' */
 

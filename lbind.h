@@ -208,8 +208,9 @@ struct lbind_Type {
 # define LBIND_DEFAULT_FLAG   (LBIND_TRACK)
 #endif
 
-#define LBIND_INIT(name) { name, LBIND_DEFAULT_FLAG, NULL, NULL }
-#define LBIND_TYPE(var, name) LB_API lbind_Type var = LBIND_INIT(name)
+#define LBIND_INIT(name, flags) { name, flags, NULL, NULL }
+#define LBIND_TYPE_FLAGS(var, name, flags) LB_API lbind_Type var = LBIND_INIT(name, flags)
+#define LBIND_TYPE(var, name) LB_API lbind_Type var = LBIND_INIT(name, LBIND_DEFAULT_FLAG)
 
 LB_API void lbind_inittype  (lbind_Type *t, const char *name);
 LB_API void lbind_setbase   (lbind_Type *t, lbind_Type **bases, lbind_Cast *cast);
@@ -243,6 +244,7 @@ LB_API void *lbind_test  (lua_State *L, int idx, const lbind_Type *t);
  * lbind_Type, if `intern` is non-zero, intern it.
  * `lbind_new` create a lbind object associated with a lbind_Type,
  * this type decide whether the object is signed up.
+ * `lbind_wrapraw` same as `lbind_raw`, but wrap a pointer instead.
  * `lbind_wrap` wrap a pointer to lbind object associated with
  * lbind_Type, the type decide the signing.
  */
@@ -313,7 +315,8 @@ LB_NS_END
 
 #endif /* LBIND_H */
 
-#ifdef LBIND_IMPLEMENTATION
+#if defined(LBIND_IMPLEMENTATION) && !defined(lbind_implemented)
+#define lbind_implemented
 
 
 #include <string.h>
