@@ -641,17 +641,12 @@ static size_t nuiH_countsize(NUItable *t) {
     return count;
 }
 
-static NUIentry *nuiH_mainposition(NUItable *t, NUIkey *key) {
-    assert((t->size & (t->size - 1)) == 0);
-    return &t->hash[nuiS_hash(key) & (t->size - 1)];
-}
-
 static NUIentry *nuiH_newkey(NUIstate *S, NUItable *t, NUIkey *key) {
     NUIentry *mp;
     if (t->size == 0 && nui_resizetable(S, t, NUI_MIN_HASHSIZE) == 0) 
         return NULL;
 redo:
-    mp = nuiH_mainposition(t, key);
+    mp = &t->hash[nui_lmod(nuiS_hash(key), t->size)];
     if (mp->key != 0) {
         NUIentry *f = NULL, *othern;
         while (t->lastfree > 0) {
@@ -664,7 +659,7 @@ redo:
             goto redo; /* return nuiH_newkey(t, entry); */
         }
         assert(f->key == NULL);
-        othern = nuiH_mainposition(t, mp->key);
+        othern = &t->hash[nui_lmod(nuiS_hash(mp->key), t->size)];
         if (othern != mp) {
             while (othern + othern->next != mp)
                 othern += othern->next;
