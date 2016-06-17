@@ -651,7 +651,7 @@ redo:
         NUIentry *f = NULL, *othern;
         while (t->lastfree > 0) {
             NUIentry *e = &t->hash[--t->lastfree];
-            if (e->key == 0)  { f = e; break; }
+            if (e->key == 0 && e->next == 0)  { f = e; break; }
         }
         if (f == NULL) {
             if (nui_resizetable(S, t, nuiH_countsize(t)*2) == 0)
