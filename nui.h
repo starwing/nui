@@ -834,6 +834,7 @@ NUI_API int nui_emitevent(NUInode *n, NUIevent *evt) {
     evt->stopped = 0;
     nuiE_capture(n, evt);
     nui_retain(n);
+    nuiE_doevent(n, evt, 1);
     if (!evt->stopped) {
         evt->phase = NUI_TARGET;
         nuiE_doevent(n, evt, 0);
