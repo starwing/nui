@@ -136,7 +136,7 @@ static void test_mem(void) {
     n = new_track_node(S);
 
     NUIevent evt; nui_initevent(&evt, NUI_(test), 1, 1);
-    set_event_data(S, &evt, NUI_(foo), nui_strdata(S, "bar"));
+    set_event_data(S, &evt, NUI_(foo), nui_newfstring(S, "bar"));
     nui_emitevent(n, &evt);
     printf("new event: %p\n", &evt);
     nui_deldata(S, get_event_data(&evt, NUI_(foo)));

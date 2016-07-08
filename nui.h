@@ -40,6 +40,7 @@
 #endif
 
 
+#include <stdarg.h>
 #include <stddef.h>
 
 NUI_NS_BEGIN
@@ -198,10 +199,12 @@ NUI_API void *nui_palloc   (NUIstate *S, NUIpool *pool);
 NUI_API void  nui_pfree    (NUIpool *pool, void *obj);
 
 NUI_API NUIdata *nui_newdata (NUIstate *S, const char *s, size_t len);
-NUI_API NUIdata *nui_strdata (NUIstate *S, const char *s);
 NUI_API void     nui_deldata (NUIstate *S, NUIdata *data);
 
-NUI_API size_t  nui_len (NUIdata *data);
+NUI_API size_t nui_len (NUIdata *data);
+
+NUI_API NUIdata *nui_newfstring  (NUIstate *S, const char *fmt, ...);
+NUI_API NUIdata *nui_newvfstring (NUIstate *S, const char *fmt, va_list l);
 
 NUI_API NUIkey *nui_newkey (NUIstate *S, const char *s, size_t len);
 NUI_API NUIkey *nui_usekey (NUIkey *key);
@@ -305,6 +308,7 @@ NUI_NS_END
 #define nui_implemented
 
 #include <assert.h>
+#include <stdio.h>
 #include <string.h>
 
 
@@ -416,9 +420,6 @@ struct NUIstate {
 NUI_API size_t nui_len(NUIdata *data)
 { return data ? ((unsigned*)data)[-1] : 0; }
 
-NUI_API NUIdata *nui_strdata(NUIstate *S, const char *s)
-{ return nui_newdata(S, s, strlen(s)); }
-
 static void *nuiM_malloc(NUIstate *S, size_t sz) {
     void *ptr;
     if (sz <= NUI_SMALLSIZE)
@@ -447,6 +448,17 @@ static void *nuiM_realloc(NUIstate *S, void *ptr, size_t nz, size_t oz) {
     newptr = S->params->alloc(S->params, ptr, nz, oz);
     if (newptr == NULL) newptr = S->params->nomem(S->params, ptr, nz, oz);
     return newptr;
+}
+
+static int nuiM_vsnprintf(char *buff, size_t size, const char *fmt, va_list l) {
+#if _MSC_VER
+    int count = -1;
+    if (size  !=  0) count = _vsnprintf_s(buff, size, _TRUNCATE, fmt, l);
+    if (count == -1) count = _vscprintf(fmt, l);
+    return count;
+#else
+    return vsnprintf(buff, size, fmt, l);
+#endif
 }
 
 NUI_API void nui_initpool(NUIpool *pool, size_t objsize) {
@@ -510,6 +522,32 @@ NUI_API void nui_deldata(NUIstate *S, NUIdata *data) {
     if (data == NULL) return;
     len = *(unsigned*)header;
     nuiM_free(S, header, sizeof(unsigned) + len + 1);
+}
+
+NUI_API NUIdata *nui_newfstring(NUIstate *S, const char *fmt, ...) {
+    NUIdata *data;
+    va_list l;
+    va_start(l, fmt);
+    data = nui_newvfstring(S, fmt, l);
+    va_end(l);
+    return data;
+}
+
+NUI_API NUIdata *nui_newvfstring(NUIstate *S, const char *fmt, va_list l) {
+    va_list l_count;
+    NUIdata *data;
+    int len;
+#ifdef va_copy
+    va_copy(l_count, l);
+#else
+    __va_copy(l_count, l);
+#endif
+    len = nuiM_vsnprintf(NULL, 0, fmt, l_count);
+    va_end(l_count);
+    if (len <= 0) return NULL;
+    data = nui_newdata(S, NULL, len);
+    nuiM_vsnprintf((char*)data, len+1, fmt, l);
+    return data;
 }
 
 
