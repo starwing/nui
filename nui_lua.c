@@ -775,7 +775,7 @@ static int Levent_tostring(lua_State *L) {
     if (levt == NULL) { lbind_tostring(L, 1); return 1; }
     lua_pushfstring(L, "%s%s: %p",
             lbT_Event.name,
-            levt->current == NULL ? "[N]" : "",
+            levt->current == NULL ? "[D]" : "",
             levt->current);
     return 1;
 }
@@ -809,13 +809,13 @@ static int Levent_hashf(lua_State *L) {
     LNUIevent *levt = lbind_check(L, 1, &lbT_Event);
     LNUIlua *ls = levt->ls;
     NUIstate *S = ls->S;
-    const NUIentry *e;
+    NUIptrentry *e;
     int i, isnode = 0;
     NUIkey *key;
     if (levt->current == NULL)
         luaL_argerror(L, 1, "expired event object");
     key = ln_checkkey(S, L, 2);
-    e = nui_gettable(nui_eventdata(levt->current), key);
+    e = (NUIptrentry*)nui_gettable(nui_eventdata(levt->current), key);
     for (i = 1; i < LNUI_KEY_MAX; ++i)
         if (key == ls->keys[i]) { isnode = 1; break; }
     if (lua_gettop(L) == 2) {
@@ -826,10 +826,10 @@ static int Levent_hashf(lua_State *L) {
     }
     if (isnode) {
         NUInode *node = lbind_check(L, 3, &lbT_Node);
-        ((NUIentry*)e)->value = node;
+        e->value = node;
     }
     /* XXX: how to hold string's life time? */
-    ((NUIentry*)e)->value = (void*)luaL_checkstring(L, 3);
+    e->value = (void*)luaL_checkstring(L, 3);
     return 0;
 }
 

@@ -1305,7 +1305,7 @@ LB_API const char *lbind_tolstring(lua_State *L, int idx, size_t *plen) {
     if (obj == NULL)
       return luaL_tolstring(L, idx, plen);
     if (tname && check_size(L, idx))
-      lua_pushfstring(L, "%s[N]: %p", tname, obj->o.instance);
+      lua_pushfstring(L, "%s[D]: %p", tname, obj->o.instance);
     else
       lua_pushfstring(L, "userdata: %p", (void*)obj);
   }

@@ -63,23 +63,31 @@ static NUInode *new_named_node(NUIstate *S, const char *name) {
     return n;
 }
 
+static void *get_event_data(const NUIevent *evt, void *key) {
+    const NUIptrentry *e = (NUIptrentry*)nui_gettable(nui_eventdata(evt), key);
+    return e ? e->value : NULL;
+}
+
+static void set_event_data(NUIstate *S, NUIevent *evt, void *key, void *value) {
+    NUIptrentry *e = (NUIptrentry*)nui_settable(S, nui_eventdata(evt), key);
+    if (e) e->value = value;
+}
+
 static void add_child(void *ud, NUInode *n, const NUIevent *evt) {
     NUIstate *S = nui_state(n);
-    const NUIentry *e = nui_gettable(nui_eventdata(evt), NUI_(child));
     printf("add_child:\t");
     putname(nui_eventnode(evt));
     printf(" <- ");
-    putname((NUInode*)e->value);
+    putname((NUInode*)get_event_data(evt, NUI_(child)));
     printf("\n");
 }
 
 static void remove_child(void *ud, NUInode *n, const NUIevent *evt) {
     NUIstate *S = nui_state(n);
-    const NUIentry *e = nui_gettable(nui_eventdata(evt), NUI_(child));
     printf("remove_child:\t");
     putname(nui_eventnode(evt));
     printf(" <- ");
-    putname((NUInode*)e->value);
+    putname((NUInode*)get_event_data(evt, NUI_(child)));
     printf("\n");
 }
 
@@ -128,10 +136,10 @@ static void test_mem(void) {
     n = new_track_node(S);
 
     NUIevent evt; nui_initevent(&evt, NUI_(test), 1, 1);
-    nui_settable(S, nui_eventdata(&evt), NUI_(foo))->value = nui_strdata(S, "bar");
+    set_event_data(S, &evt, NUI_(foo), nui_strdata(S, "bar"));
     nui_emitevent(n, &evt);
     printf("new event: %p\n", &evt);
-    nui_deldata(S, (NUIdata*)nui_gettable(nui_eventdata(&evt), NUI_(foo))->value);
+    nui_deldata(S, get_event_data(&evt, NUI_(foo)));
     nui_freeevent(S, &evt);
 
     NUIattr attr = { NULL };
@@ -222,7 +230,7 @@ static void on_foo(void *ud, NUInode *n, const NUIevent *evt) {
 
 static void on_remove_child(void *ud, NUInode *n, const NUIevent *evt) {
     NUIstate *S = nui_state(n);
-    NUInode *child = (NUInode*)nui_gettable(nui_eventdata(evt), NUI_(child))->value;
+    NUInode *child = (NUInode*)((NUIptrentry*)nui_gettable(nui_eventdata(evt), NUI_(child)))->value;
     nui_detach(child); /* trigger new event, should loop */
 }
 

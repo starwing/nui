@@ -57,11 +57,13 @@ typedef struct NUItype  NUItype;
 typedef struct NUIcomp  NUIcomp;
 typedef struct NUIevent NUIevent;
 
-typedef struct NUIpool   NUIpool;
-typedef struct NUIdata   NUIdata;
-typedef struct NUIkey    NUIkey;
-typedef struct NUIentry  NUIentry;
-typedef struct NUItable  NUItable;
+typedef struct NUIpool  NUIpool;
+typedef struct NUIdata  NUIdata;
+typedef struct NUIkey   NUIkey;
+typedef struct NUIentry NUIentry;
+typedef struct NUItable NUItable;
+
+typedef struct NUIptrentry NUIptrentry;
 
 #ifdef ZN_USE_64BIT_TIMER
 typedef unsigned long long NUItime;
@@ -209,13 +211,13 @@ NUI_API void    nui_delkey (NUIstate *S, NUIkey *key);
 
 /* nui table routines */
 
-NUI_API void nui_inittable (NUItable *t);
+NUI_API void nui_inittable (NUItable *t, size_t entrysize);
 NUI_API void nui_freetable (NUIstate *S, NUItable *t);
 
 NUI_API size_t    nui_resizetable (NUIstate *S, NUItable *t, size_t len);
-NUI_API NUIentry *nui_settable    (NUIstate *S, NUItable *t, NUIkey *key);
+NUI_API NUIentry *nui_settable    (NUIstate *S, NUItable *t, void *key);
 
-NUI_API const NUIentry *nui_gettable (const NUItable *t, NUIkey *key);
+NUI_API const NUIentry *nui_gettable (const NUItable *t, void *key);
 
 NUI_API int nui_nextentry (const NUItable *t, NUIentry **e);
 
@@ -230,13 +232,13 @@ struct NUIpool {
 
 struct NUIentry {
     ptrdiff_t next;
-    NUIkey   *key;
-    void     *value;
+    void     *key;
 };
 
 struct NUItable {
-    size_t size;
-    size_t lastfree;
+    size_t    size;
+    size_t    entrysize;
+    size_t    lastfree;
     NUIentry *hash;
 };
 
@@ -257,6 +259,11 @@ struct NUIattr {
                           NUIkey *key, const char *v);
     void     (*del_attr) (NUIattr *attr, NUInode *node);
 };
+
+typedef struct NUIptrentry {
+    NUIentry base;
+    void *value;
+} NUIptrentry;
 
 struct NUIevent {
     NUIkey   *type; /* all readonly except data */
@@ -621,36 +628,36 @@ static void nuiS_close(NUIstate *S) {
 
 /* hash table */
 
-NUI_API void nui_inittable(NUItable *t)
-{ t->size = 0, t->lastfree = 0, t->hash = NULL; }
+#define nuiH_offset(a, b) ((char*)(a) - (char*)(b))
+#define nuiH_index(a, b)  ((NUIentry*)((char*)(a) + (b)))
 
-static size_t nuiH_hashsize(size_t len) {
+static size_t nuiH_hashsize(size_t len, size_t entrysize) {
     size_t newsize = NUI_MIN_HASHSIZE;
-    while (newsize < NUI_MAX_SIZET/2/sizeof(NUIentry) && newsize < len)
+    while (newsize < NUI_MAX_SIZET/2/entrysize && newsize < len)
         newsize <<= 1;
-    return newsize;
+    return newsize < len ? 0 : newsize;
 }
 
 static size_t nuiH_countsize(NUItable *t) {
     size_t i, count = 0;
     for (i = 0; i < t->size; ++i) {
         NUIentry *e = &t->hash[i];
-        if (e->key != NULL && e->value != NULL)
-            ++count;
+        if (e->key != NULL) ++count;
     }
     return count;
 }
 
 static NUIentry *nuiH_newkey(NUIstate *S, NUItable *t, NUIkey *key) {
     NUIentry *mp;
-    if (t->size == 0 && nui_resizetable(S, t, NUI_MIN_HASHSIZE) == 0) 
+    if (key == NULL ||
+            (t->size == 0 && nui_resizetable(S, t, NUI_MIN_HASHSIZE) == 0))
         return NULL;
 redo:
-    mp = &t->hash[nui_lmod(nuiS_hash(key), t->size)];
+    mp = nuiH_index(t->hash, nui_lmod(nuiS_hash(key), t->size)*t->entrysize);
     if (mp->key != 0) {
         NUIentry *f = NULL, *othern;
         while (t->lastfree > 0) {
-            NUIentry *e = &t->hash[--t->lastfree];
+            NUIentry *e = nuiH_index(t->hash, t->lastfree-=t->entrysize);
             if (e->key == 0 && e->next == 0)  { f = e; break; }
         }
         if (f == NULL) {
@@ -659,26 +666,34 @@ redo:
             goto redo; /* return nuiH_newkey(t, entry); */
         }
         assert(f->key == NULL);
-        othern = &t->hash[nui_lmod(nuiS_hash(mp->key), t->size)];
+        othern = nuiH_index(t->hash, nui_lmod(nuiS_hash(mp->key), t->size)*t->entrysize);
         if (othern != mp) {
-            while (othern + othern->next != mp)
-                othern += othern->next;
-            othern->next = f - othern;
+            NUIentry *next;
+            while ((next = nuiH_index(othern, othern->next)) != mp)
+                othern = next;
+            othern->next = nuiH_offset(f, othern);
             *f = *mp;
             if (mp->next != 0)
-            { f->next += mp - f; mp->next = 0; }
+            { f->next += nuiH_offset(mp, f); mp->next = 0; }
         }
         else {
             if (mp->next != 0)
-                f->next = (mp + mp->next) - f;
+                f->next = nuiH_offset(mp, f) + mp->next;
             else assert(f->next == 0);
-            mp->next = f - mp; mp = f;
+            mp->next = nuiH_offset(f, mp); mp = f;
         }
     }
     mp->key = key;
-    mp->value = NULL;
     nui_usekey(key);
     return mp;
+}
+
+NUI_API void nui_inittable(NUItable *t, size_t entrysize) {
+    if (entrysize < sizeof(NUIentry)) entrysize = sizeof(NUIentry);
+    t->size      = 0;
+    t->entrysize = entrysize;
+    t->lastfree  = 0;
+    t->hash      = NULL;
 }
 
 NUI_API void nui_freetable(NUIstate *S, NUItable *t) {
@@ -688,55 +703,56 @@ NUI_API void nui_freetable(NUIstate *S, NUItable *t) {
         if (e->key != NULL) nui_delkey(S, e->key);
     }
     if (t->hash != NULL)
-        nuiM_free(S, t->hash, t->size*sizeof(NUIentry));
-    nui_inittable(t);
+        nuiM_free(S, t->hash, t->size*t->entrysize);
+    nui_inittable(t, t->entrysize);
 }
 
 NUI_API size_t nui_resizetable(NUIstate *S, NUItable *t, size_t len) {
-    size_t i;
-    NUItable nt;
-    nt.size = nuiH_hashsize(len);
-    nt.hash = (NUIentry*)nuiM_malloc(S, nt.size*sizeof(NUIentry));
-    nt.lastfree = nt.size;
-    memset(nt.hash, 0, sizeof(NUIentry)*nt.size);
-    for (i = 0; i < t->size; ++i) {
-        NUIentry *e = &t->hash[i];
-        if (e->key != NULL && e->value != NULL)
-            nuiH_newkey(S, &nt, e->key);
+    size_t i, size = t->size*t->entrysize;
+    NUItable nt = *t;
+    if ((nt.size = nuiH_hashsize(len, nt.entrysize)) == 0) return 0;
+    nt.hash = (NUIentry*)nuiM_malloc(S, nt.lastfree = nt.size*nt.entrysize);
+    memset(nt.hash, 0, nt.lastfree);
+    for (i = 0; i < size; i += nt.entrysize) {
+        NUIentry *e = nuiH_index(t->hash, i);
+        NUIentry *ne = nuiH_newkey(S, &nt, e->key);
+        if (ne != NULL && nt.entrysize > sizeof(NUIentry))
+            memcpy(ne+1, e+1, nt.entrysize - sizeof(NUIentry));
     }
-    nuiM_free(S, t->hash, t->size*sizeof(NUIentry));
+    if (t->hash != NULL) nuiM_free(S, t->hash, size);
     *t = nt;
     return t->size;
 }
 
-NUI_API const NUIentry *nui_gettable(const NUItable *t, NUIkey *key) {
+NUI_API const NUIentry *nui_gettable(const NUItable *t, void *key) {
     const NUIentry *e;
     if (t->size == 0 || key == NULL) return NULL;
     assert((t->size & (t->size - 1)) == 0);
-    e = &t->hash[nui_lmod(nuiS_hash(key), t->size)];
+    e = nuiH_index(t->hash, nui_lmod(nuiS_hash(key), t->size)*t->entrysize);
     while (1) {
         ptrdiff_t next = e->next;
         if (e->key == key) return e;
         if (next == 0) return NULL;
-        e += next;
+        e = nuiH_index(e, next);
     }
     return NULL;
 }
 
-NUI_API NUIentry *nui_settable(NUIstate *S, NUItable *t, NUIkey *key) {
+NUI_API NUIentry *nui_settable(NUIstate *S, NUItable *t, void *key) {
     NUIentry *ret;
-    if (key == NULL) return NULL;
-    if ((ret = (NUIentry*)nui_gettable(t, key)) != NULL)
-        return ret;
-    return nuiH_newkey(S, t, key);
+    if ((ret = (NUIentry*)nui_gettable(t, key)) == NULL
+            && (ret = nuiH_newkey(S, t, key)) != NULL
+            && t->entrysize > sizeof(NUIentry))
+        memset(ret+1, 0, t->entrysize - sizeof(NUIentry));
+    return ret;
 }
 
 NUI_API int nui_nextentry(const NUItable *t, NUIentry **pentry) {
-    size_t i = *pentry ? *pentry - &t->hash[0] + 1 : 0;
-    for (; i < t->size; ++i) {
-        NUIentry *e = &t->hash[i];
-        if (e->key != NULL && e->value != NULL)
-        { *pentry = e; return 1; }
+    size_t i = *pentry ? nuiH_offset(pentry, t->hash) + t->entrysize : 0;
+    size_t size = t->size*t->entrysize;
+    for (; i < size; i += t->entrysize) {
+        NUIentry *e = nuiH_index(t->hash, i);
+        if (e->key != NULL) { *pentry = e; return 1; }
     }
     *pentry = NULL;
     return 0;
@@ -745,6 +761,8 @@ NUI_API int nui_nextentry(const NUItable *t, NUIentry **pentry) {
 
 /* nui event handlers */
 
+typedef struct NUIhentry { NUIentry base; NUIhandlers *h; } NUIhentry;
+
 NUI_API void nui_cancelevent(const NUIevent *evt)
 { if (evt->cancelable) ((NUIevent*)evt)->canceled = 1; }
 
@@ -752,9 +770,9 @@ NUI_API void nui_stopevent(const NUIevent *evt, int stopnow)
 { ((NUIevent*)evt)->stopnow = stopnow ? 1:0; ((NUIevent*)evt)->stopped = 1; }
 
 static void nuiE_dodefault(NUInode *n, NUIevent *evt) {
-    const NUIentry *e = nui_gettable(&n->handlers, evt->type);
+    const NUIhentry *he = (NUIhentry*)nui_gettable(&n->handlers, evt->type);
     NUIhandlers *hs;
-    if (e == NULL || (hs = (NUIhandlers*)e->value) == NULL)
+    if (he == NULL || (hs = he->h) == NULL)
         return;
     if (hs->u.handler && hs->level < NUI_MAX_EVENTLEVEL) {
         ++hs->level;
@@ -777,12 +795,10 @@ static void nuiE_sweepdead(NUIstate *S, NUIhandlers *hs) {
 }
 
 static void nuiE_doevent(NUInode *n, NUIevent *evt, int capture) {
-    const NUIentry *e = nui_gettable(&n->handlers, evt->type);
+    const NUIhentry *he = (NUIhentry*)nui_gettable(&n->handlers, evt->type);
     NUIhandlers *hs, *p;
     int havedead = 0;
-    if (e == NULL ||
-            (hs = (NUIhandlers*)e->value) == NULL ||
-            (p = hs->next) == NULL)
+    if (he == NULL || (hs = he->h) == NULL || (p = hs->next) == NULL)
         return;
     assert(capture == 0 || capture == 1);
     hs->running = 1;
@@ -855,6 +871,7 @@ NUI_API void nui_initevent(NUIevent *evt, NUIkey *type, int bubbles, int cancela
     evt->type = type;
     evt->bubbles    = bubbles    ? 1 : 0;
     evt->cancelable = cancelable ? 1 : 0;
+    nui_inittable(&evt->data, sizeof(NUIptrentry));
     nui_usekey(type);
 }
 
@@ -875,25 +892,25 @@ NUI_API int nui_eventstatus(const NUIevent *evt, int status) {
 }
 
 NUI_API void nui_defhandler(NUInode *n, NUIkey *type, NUIhandlerf *h, void *ud) {
-    NUIentry *e = nui_settable(n->S, &n->handlers, type);
-    NUIhandlers *hs = e ? (NUIhandlers*)e->value : NULL;
+    NUIhentry *he = (NUIhentry*)nui_settable(n->S, &n->handlers, type);
+    NUIhandlers *hs = he ? he->h : NULL;
     if (hs == NULL) {
         hs = (NUIhandlers*)nui_palloc(n->S, &n->S->handlerpool);
         memset(hs, 0, sizeof(*hs));
-        e->value = hs;
+        he->h = hs;
     }
     hs->u.handler = h;
     hs->ud        = ud;
 }
 
 NUI_API void nui_addhandler(NUInode *n, NUIkey *type, int capture, NUIhandlerf *h, void *ud) {
-    NUIentry *e = nui_settable(n->S, &n->handlers, type);
+    NUIhentry *he = (NUIhentry*)nui_settable(n->S, &n->handlers, type);
     NUIhandlers **pp, *hs;
-    if (h == NULL || e == NULL) return;
-    if ((hs = (NUIhandlers*)e->value) == NULL) {
+    if (h == NULL || he == NULL) return;
+    if ((hs = he->h) == NULL) {
         hs = (NUIhandlers*)nui_palloc(n->S, &n->S->handlerpool);
         memset(hs, 0, sizeof(*hs));
-        e->value = hs;
+        he->h = hs;
     }
     pp = &hs->next;
     while (*pp != NULL) pp = &(*pp)->next;
@@ -905,8 +922,9 @@ NUI_API void nui_addhandler(NUInode *n, NUIkey *type, int capture, NUIhandlerf *
 }
 
 NUI_API void nui_delhandler(NUInode *n, NUIkey *type, int capture, NUIhandlerf *h, void *ud) {
-    const NUIentry *e = nui_gettable(&n->handlers, type);
-    NUIhandlers **pp, *hs = (NUIhandlers*)e->value;
+    const NUIhentry *he = (NUIhentry*)nui_gettable(&n->handlers, type);
+    NUIhandlers **pp, *hs = he ? he->h : NULL;
+    if (hs == NULL) return;
     pp = &hs->next; /* skip default handler */
     while (*pp != NULL) {
         NUIhandlers *cur = *pp, **next = &(*pp)->next;
@@ -927,9 +945,9 @@ NUI_API void nui_delhandler(NUInode *n, NUIkey *type, int capture, NUIhandlerf *
 }
 
 void nuiE_clear(NUInode *n) {
-    NUIentry *e = NULL;
-    while (nui_nextentry(&n->handlers, &e)) {
-        NUIhandlers *hs = (NUIhandlers*)e->value;
+    NUIhentry *he = NULL;
+    while (nui_nextentry(&n->handlers, (NUIentry**)&he)) {
+        NUIhandlers *hs = he->h;
         while (hs) {
             NUIhandlers *next = hs->next;
             nui_pfree(&n->S->handlerpool, hs);
@@ -942,25 +960,29 @@ void nuiE_clear(NUInode *n) {
 
 /* nui attribute */
 
+typedef struct NUIaentry { NUIentry base; NUIattr *attr; } NUIaentry;
+
 NUI_API NUIattr *nui_setattr(NUInode *n, NUIkey *key, NUIattr *attr) {
-    NUIentry *e = nui_settable(n->S, &n->attrs, key);
+    NUIaentry *ae = (NUIaentry*)nui_settable(n->S, &n->attrs, key);
     if (!attr) { nui_delattr(n, key); return NULL; }
-    return (NUIattr*)(!e || e->value ? NULL : (e->value = attr));
+    return (NUIattr*)(!ae || ae->attr ? NULL : (ae->attr = attr));
 }
 
 NUI_API NUIattr *nui_getattr(NUInode *n, NUIkey *key) {
-    const NUIentry *e = nui_gettable(&n->attrs, key);
-    return e ? (NUIattr*)e->value : NULL;
+    const NUIaentry *ae = (NUIaentry*)nui_gettable(&n->attrs, key);
+    return ae ? ae->attr : NULL;
 }
 
 NUI_API NUIattr *nui_delattr(NUInode *n, NUIkey *name) {
-    const NUIentry *e = nui_gettable(&n->attrs, name);
+    NUIaentry *ae = (NUIaentry*)nui_gettable(&n->attrs, name);
     NUIattr *attr;
-    if (e == NULL) return NULL;
-    attr = (NUIattr*)e->value;
+    if (ae == NULL) return NULL;
+    attr = ae->attr;
     if (attr->del_attr != NULL)
         attr->del_attr(attr, n);
-    ((NUIentry*)e)->value = NULL;
+    nui_delkey(n->S, (NUIkey*)ae->base.key);
+    ae->base.key = NULL;
+    ae->attr = NULL;
     return attr;
 }
 
@@ -1018,13 +1040,11 @@ NUI_API NUIdata *nui_get(NUInode *n, NUIkey *key) {
 }
 
 static void nuiA_clear(NUInode *n) {
-    NUIentry *e = NULL;
     NUIhandlers *hs;
-    while (nui_nextentry(&n->attrs, &e)) {
-        NUIattr *attr = (NUIattr*)e->value;
-        if (attr->del_attr)
-            attr->del_attr(attr, n);
-    }
+    NUIaentry *ae = NULL;
+    while (nui_nextentry(&n->attrs, (NUIentry**)&ae))
+        if (ae->attr && ae->attr->del_attr)
+            ae->attr->del_attr(ae->attr, n);
     nui_freetable(n->S, &n->attrs);
     hs = n->attrhandlers;
     while (hs) {
@@ -1041,10 +1061,13 @@ static void nuiA_clear(NUInode *n) {
 
 /* nui componemt */
 
+typedef struct NUItentry { NUIentry base; NUItype *type; } NUItentry;
+typedef struct NUIcentry { NUIentry base; NUIcomp *comp; } NUIcentry;
+
 NUI_API NUItype *nui_newtype(NUIstate *S, NUIkey *name, size_t size, size_t csize) {
-    NUIentry *e = nui_settable(S, &S->types, name);
+    NUItentry *te = (NUItentry*)nui_settable(S, &S->types, name);
     NUItype *t;
-    if (!e || e->value != NULL) return NULL;
+    if (!te || te->type != NULL) return NULL;
     if (size  < sizeof(NUItype))  size = sizeof(NUItype);
     if (csize < sizeof(NUIcomp)) csize = sizeof(NUIcomp);
     t = (NUItype*)nuiM_malloc(S, size);
@@ -1054,22 +1077,22 @@ NUI_API NUItype *nui_newtype(NUIstate *S, NUIkey *name, size_t size, size_t csiz
     t->comp_size = csize;
     if (csize < NUI_POOLSIZE/4)
         nui_initpool(&t->comp_pool, csize);
-    e->value = t;
+    te->type = t;
     return t;
 }
 
 NUI_API NUItype *nui_gettype(NUIstate *S, NUIkey *name) {
-    const NUIentry *e = nui_gettable(&S->types, name);
-    return e ? (NUItype*)e->value : NULL;
+    const NUItentry *te = (NUItentry*)nui_gettable(&S->types, name);
+    return te ? te->type : NULL;
 }
 
 NUI_API NUIcomp *nui_addcomp(NUInode *n, NUItype *t) {
-    NUIentry *e = nui_settable(n->S, &n->comps, t->name);
+    NUIcentry *ce = (NUIcentry*)nui_settable(n->S, &n->comps, t->name);
     NUItype **depends;
     NUIcomp *comp;
     size_t i, dlen;
-    if (e == NULL) return NULL;
-    if (e->value) return (NUIcomp*)e->value;
+    if (ce == NULL) return NULL;
+    if (ce->comp) return ce->comp;
     if (t->depends && (depends = t->depends(t, &dlen)) != NULL)
         for (i = 0; i < dlen; ++i)
             nui_addcomp(n, depends[i]);
@@ -1082,20 +1105,20 @@ NUI_API NUIcomp *nui_addcomp(NUInode *n, NUItype *t) {
         nui_pfree(&t->comp_pool, comp);
         return NULL;
     }
-    e->value = comp;
+    ce->comp = comp;
     comp->type = t;
     return comp;
 }
 
 NUI_API NUIcomp *nui_getcomp(NUInode *n, NUItype *t) {
-    const NUIentry *e = nui_gettable(&n->comps, t->name);
-    return e ? (NUIcomp*)e->value : NULL;
+    const NUIcentry *ce = (NUIcentry*)nui_gettable(&n->comps, t->name);
+    return ce ? ce->comp : NULL;
 }
 
 static void nuiC_close(NUIstate *S) {
-    NUIentry *e = NULL;
-    while (nui_nextentry(&S->types, &e)) {
-        NUItype *t = (NUItype*)e->value;
+    NUItentry *te = NULL;
+    while (nui_nextentry(&S->types, (NUIentry**)&te)) {
+        NUItype *t = te->type;
         if (t->close != NULL)
             t->close(t, S);
         nui_freepool(S, &t->comp_pool);
@@ -1105,9 +1128,9 @@ static void nuiC_close(NUIstate *S) {
 }
 
 static void nuiC_clear(NUInode *n) {
-    NUIentry *e = NULL;
-    while (nui_nextentry(&n->comps, &e)) {
-        NUIcomp *comp = (NUIcomp*)e->value;
+    NUIcentry *ce = NULL;
+    while (nui_nextentry(&n->comps, (NUIentry**)&ce)) {
+        NUIcomp *comp = ce->comp;
         NUItype *type = comp->type;
         if (type->del_comp)
             type->del_comp(comp->type, n, comp);
@@ -1179,7 +1202,7 @@ static int nuiN_emitevent(int id, int cancelable, NUInode *n, NUInode *parent) {
         ret = nui_emitevent(n, &evt);
     else if (parent) {
         NUIkey *child = S->builtins[NUI_child];
-        nui_settable(S, &evt.data, child)->value = n;
+        ((NUIptrentry*)nui_settable(S, &evt.data, child))->value = n;
         ret = nui_emitevent(parent, &evt);
     }
     nui_freeevent(S, &evt);
@@ -1195,7 +1218,7 @@ static void nuiN_childrenevents(NUIstate *S, int id, NUInode *parent) {
     nui_initevent(&evt, S->builtins[id], 0, 0);
     for (i = nui_nextchild(parent, NULL); i != NULL; i = next) {
         next = nui_nextchild(parent, i);
-        nui_settable(S, &evt.data, child)->value = i;
+        ((NUIptrentry*)nui_settable(S, &evt.data, child))->value = i;
         nui_emitevent(parent, &evt);
     }
     nui_freeevent(S, &evt);
@@ -1250,6 +1273,9 @@ NUI_API NUInode *nui_newnode(NUIstate *S) {
     memset(n, 0, sizeof(NUInode));
     n->ref = 0;
     n->S = S;
+    nui_inittable(&n->comps, sizeof(NUIcentry));
+    nui_inittable(&n->attrs, sizeof(NUIaentry));
+    nui_inittable(&n->handlers, sizeof(NUIhentry));
     nuiN_append(&S->freenodes, n);
     return n;
 }
@@ -1659,10 +1685,14 @@ NUI_API NUIstate *nui_newstate(NUIparams *params) {
     S->params = params;
     S->base.S = S;
     S->base.next_sibling = S->base.prev_sibling = &S->base;
+    nui_inittable(&S->base.attrs, sizeof(NUIaentry));
+    nui_inittable(&S->base.comps, sizeof(NUIcentry));
+    nui_inittable(&S->base.handlers, sizeof(NUIhentry));
     nui_initpool(&S->timers.pool, sizeof(NUItimer));
     nui_initpool(&S->handlerpool, sizeof(NUIhandlers));
     nui_initpool(&S->nodepool, sizeof(NUInode));
     nui_initpool(&S->smallpool, NUI_SMALLSIZE);
+    nui_inittable(&S->types, sizeof(NUItentry));
 #define X(str) S->builtins[NUI_##str] = nui_usekey(NUI_(str));
     nui_builtinkeys(X)
 #undef  X

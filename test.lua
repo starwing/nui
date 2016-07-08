@@ -9,12 +9,13 @@ function test_mem()
    local e = S:event "foo"
    local nt = S:type "foo" {}
    S:delete()
-   assert(tostring(t):match "%[N%]")
-   assert(tostring(n):match "%[N%]")
-   assert(tostring(a):match "%[N%]")
-   assert(tostring(e):match "%[N%]")
-   assert(tostring(nt):match "%[N%]")
-   assert(tostring(S):match "%[N%]")
+   print(t, n, a, e, nt, S)
+   assert(tostring(t):match "%[D%]")
+   assert(tostring(n):match "%[D%]")
+   assert(tostring(a):match "%[D%]")
+   assert(tostring(e):match "%[D%]")
+   assert(tostring(nt):match "%[D%]")
+   assert(tostring(S):match "%[D%]")
    io.write("OK\n")
 end
 
