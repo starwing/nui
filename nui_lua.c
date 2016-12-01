@@ -243,7 +243,7 @@ typedef struct LNUItimer {
     LNUIlua *ls;
     int ref;
     int ontimer_ref;
-    unsigned delayms;
+    NUItime delayms;
 } LNUItimer;
 
 static NUItime ln_ontimer(void *ud, NUItimer *timer, NUItime elapsed) {
@@ -301,7 +301,7 @@ static int Ltimer_start(lua_State *L) {
     lua_Integer delayms = luaL_optinteger(L, 2, 0);
     if (!lt->timer) return 0;
     if (delayms < 0) delayms = 0;
-    lt->delayms = (unsigned)delayms;
+    lt->delayms = (NUItime)delayms;
     if (nui_starttimer(lt->timer, lt->delayms))
         ln_ref(L, 1, &lt->ref);
     lbind_returnself(L);
@@ -1382,13 +1382,14 @@ static int Lstate_delete(lua_State *L) {
 
 static int Lstate_pollevents(lua_State *L) {
     NUIstate *S = ln_checkstate(L, 1);
-    lua_pushboolean(L, nui_pollevents(S));
+    lua_pushboolean(L, nui_waitevents(S, 0));
     return 1;
 }
 
 static int Lstate_waitevents(lua_State *L) {
     NUIstate *S = ln_checkstate(L, 1);
-    lua_pushboolean(L, nui_waitevents(S));
+    lua_Integer delayms = luaL_optinteger(L, 2, NUI_FOREVER);
+    lua_pushboolean(L, nui_waitevents(S, (NUItime)delayms));
     return 1;
 }
 

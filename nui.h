@@ -88,7 +88,7 @@ NUI_API void      nui_close    (NUIstate *S);
 
 NUI_API NUIparams *nui_getparams (NUIstate *S);
 
-NUI_API int  nui_waitevents (NUIstate *S);
+NUI_API int  nui_waitevents (NUIstate *S, NUItime waittime);
 NUI_API int  nui_loop       (NUIstate *S);
 
 
@@ -1125,7 +1125,8 @@ NUI_API NUItype *nui_gettype(NUIstate *S, NUIkey *name) {
 }
 
 NUI_API NUIcomp *nui_addcomp(NUInode *n, NUItype *t) {
-    NUIcentry *ce = (NUIcentry*)nui_settable(n->S, &n->comps, t->name);
+    NUIcentry *ce = n&&t ? (NUIcentry*)nui_settable(n->S, &n->comps, t->name)
+        : NULL;
     NUItype **depends;
     NUIcomp *comp;
     size_t i, dlen;
@@ -1149,7 +1150,8 @@ NUI_API NUIcomp *nui_addcomp(NUInode *n, NUItype *t) {
 }
 
 NUI_API NUIcomp *nui_getcomp(NUInode *n, NUItype *t) {
-    const NUIcentry *ce = (NUIcentry*)nui_gettable(&n->comps, t->name);
+    const NUIcentry *ce = n ? (NUIcentry*)nui_gettable(&n->comps, t->name)
+        : NULL;
     return ce ? ce->comp : NULL;
 }
 
@@ -1545,7 +1547,7 @@ NUI_API void nui_deltimer(NUItimer *timer) {
 }
 
 NUI_API int nui_starttimer(NUItimer *timer, NUItime delayms) {
-    unsigned index;
+    unsigned index, parent;
     NUItimerstate *ts = &timer->S->timers;
     if (timer->index != NUI_TIMER_NOINDEX)
         nui_canceltimer(timer);
@@ -1555,10 +1557,8 @@ NUI_API int nui_starttimer(NUItimer *timer, NUItime delayms) {
     index = (unsigned)ts->heap_used++;
     timer->starttime = nui_time(timer->S);
     timer->emittime = timer->starttime + delayms;
-    while (index) {
-        unsigned parent = (index-1)>>1;
-        if (ts->heap[parent]->emittime <= timer->emittime)
-            break;
+    while (index > 0
+            && ts->heap[parent = index>>1]->emittime > timer->emittime) {
         ts->heap[index] = ts->heap[parent];
         ts->heap[index]->index = index;
         index = parent;
@@ -1572,26 +1572,21 @@ NUI_API int nui_starttimer(NUItimer *timer, NUItime delayms) {
 NUI_API void nui_canceltimer(NUItimer *timer) {
     NUItimerstate *ts = &timer->S->timers;
     unsigned index = (unsigned)timer->index;
-    if (index == NUI_TIMER_NOINDEX) return;
-    timer->index = NUI_TIMER_NOINDEX;
-    if (ts->heap_used == 0 || timer == ts->heap[--ts->heap_used])
+    if (index == NUI_TIMER_NOINDEX || ts->heap_used == 0)
         return;
-    timer = ts->heap[ts->heap_used];
-    while (1) {
-        unsigned left = (index<<1)|1, right = (index+1)<<1;
-        unsigned newindex = right;
-        if (left >= ts->heap_used) break;
-        if (timer->emittime >= ts->heap[left]->emittime) {
-            if (right >= ts->heap_used
-                    || ts->heap[left]->emittime < ts->heap[right]->emittime)
-                newindex = left;
-        }
-        else if (right >= ts->heap_used
-                || timer->emittime <= ts->heap[right]->emittime)
+    timer->index = NUI_TIMER_NOINDEX;
+    timer = ts->heap[--ts->heap_used];
+    ts->heap[index] = timer;
+    while (index < ts->heap_used) {
+        unsigned child = index<<1;
+        if (child + 1 < ts->heap_used
+                && ts->heap[child]->emittime > ts->heap[child+1]->emittime)
+            ++child;
+        if (timer->emittime <= ts->heap[child]->emittime)
             break;
-        ts->heap[index] = ts->heap[newindex];
+        ts->heap[index] = ts->heap[child];
         ts->heap[index]->index = index;
-        index = newindex;
+        index = child;
     }
     ts->heap[index] = timer;
     timer->index = index;
@@ -1760,31 +1755,24 @@ NUI_API void nui_close(NUIstate *S) {
     params->S = NULL;
 }
 
-NUI_API int nui_pollevents(NUIstate *S) {
-    int ret = 0;
+NUI_API int nui_waitevents(NUIstate *S, NUItime waittime) {
+    int ret;
     if (nuiT_hastimers(S)) {
-        NUItime current = nui_time(S);
+        NUItime current = nui_time(S), timerwait;
         nuiT_updatetimers(S, current);
+        timerwait = nuiT_gettimeout(S, current);
+        if (timerwait < waittime) waittime = timerwait;
     }
+    if (S->base.child_count == 0 && !nuiT_hastimers(S))
+        waittime = 0;
+    ret = S->params->wait(S->params, waittime);
     S->freenodes = nuiN_sweepdead(S->freenodes);
     return !(ret || nuiT_hastimers(S) || S->base.child_count != 0);
 }
 
-NUI_API int nui_waitevents(NUIstate *S) {
-    int ret;
-    if (nuiT_hastimers(S)) {
-        NUItime current = nui_time(S);
-        nuiT_updatetimers(S, current);
-        if ((ret = S->params->wait(S->params,
-                        nuiT_gettimeout(S, current))) < 0)
-            return ret;
-    }
-    return nui_pollevents(S);
-}
-
 NUI_API int nui_loop(NUIstate *S) {
     int ret;
-    while ((ret = nui_waitevents(S)) == 0)
+    while ((ret = nui_waitevents(S, NUI_FOREVER)) == 0)
         ;
     return ret;
 }
